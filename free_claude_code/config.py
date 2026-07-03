@@ -79,15 +79,15 @@ def _api_value(values: Dict[str, str]) -> str:
 def write_env_values(updates: Dict[str, str]) -> None:
     """Write a minimal user-facing .env.
 
-    NVIDIA_NIM_API, NVIDIA_NIM_MODEL and RECENT_MODELS are persisted.
+    NVIDIA_NIM_API, NVIDIA_NIM_MODEL and LAST_MODEL are persisted.
     """
     p = ensure_env()
     old = parse_env_text(p.read_text(encoding="utf-8"))
     old.update({k: v for k, v in updates.items() if k})
     api = _api_value(old)
     model = old.get("NVIDIA_NIM_MODEL", DEFAULT_NVIDIA_NIM_MODEL)
-    recent = old.get("RECENT_MODELS", "")
-    content = ENV_HEADER + f"\nNVIDIA_NIM_API={api or 'your-api-key'}\nNVIDIA_NIM_MODEL={model}\nRECENT_MODELS={recent}\n"
+    last = old.get("LAST_MODEL", "")
+    content = ENV_HEADER + f"\nNVIDIA_NIM_API={api or 'your-api-key'}\nNVIDIA_NIM_MODEL={model}\nLAST_MODEL={last}\n"
     p.write_text(content, encoding="utf-8")
     try:
         p.chmod(stat.S_IRUSR | stat.S_IWUSR)

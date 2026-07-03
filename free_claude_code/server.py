@@ -15,7 +15,15 @@ from typing import Any, Dict, Iterable, Optional
 from urllib.parse import parse_qs, urlparse
 
 from .anthropic import build_openai_request, estimate_tokens, openai_to_anthropic
-from .config import DEFAULT_HOST, DEFAULT_NVIDIA_NIM_BASE_URL, DEFAULT_PORT, get_provider, load_env, write_env_values
+from .config import (
+    DEFAULT_HOST,
+    DEFAULT_NVIDIA_NIM_BASE_URL,
+    DEFAULT_NVIDIA_NIM_MODEL,
+    DEFAULT_PORT,
+    get_provider,
+    load_env,
+    write_env_values,
+)
 
 SENSITIVE_KEYS = ("API", "API_KEY")
 
@@ -433,8 +441,7 @@ class Handler(BaseHTTPRequestHandler):
         provider = get_provider(values)
         api_value = provider.api_key or ""
         current_model = provider.model
-        recent_models = values.get("RECENT_MODELS", "").split(",")
-        recent_models = [m for m in recent_models if m]
+        last_model = values.get("LAST_MODEL", "")
 
         models = []
         try:
@@ -450,12 +457,9 @@ class Handler(BaseHTTPRequestHandler):
 
         options = "".join(f'<option value="{html.escape(m)}"{ " selected" if m == current_model else ""}>{html.escape(m)}</option>' for m in models)
 
-        recent_html = ""
-        if recent_models:
-            recent_html = "<h3>Recently Used Models</h3><div style='margin-bottom:1rem;'>"
-            for rm in recent_models[:5]:
-                recent_html += f'<button type="button" style="margin-right:0.5rem;margin-bottom:0.5rem;padding:0.4rem 0.8rem;font-size:0.8rem;" onclick="document.getElementsByName(\'NVIDIA_NIM_MODEL\')[0].value=\'{html.escape(rm)}\'">{html.escape(rm)}</button>'
-            recent_html += "</div>"
+        last_model_html = ""
+        if last_model and last_model != current_model:
+            last_model_html = f"<h3>Last Used Model</h3><div style='margin-bottom:1rem;'><button type='button' style='padding:0.4rem 0.8rem;font-size:0.8rem;' onclick='document.getElementsByName(\"NVIDIA_NIM_MODEL\")[0].value=\"{html.escape(last_model)}\"'>{html.escape(last_model)}</button></div>"
 
         html_doc = f"""<!doctype html><html><head><meta charset="utf-8"><title>My ClaudeCode Server Admin</title>
 <style>
@@ -484,7 +488,7 @@ class Handler(BaseHTTPRequestHandler):
   <h3>NVIDIA NIM Settings</h3>
   <label>NVIDIA_NIM_API<input name="NVIDIA_NIM_API" value="{html.escape(mask(api_value))}" placeholder="your-api-key"></label>
   <label>Default Model (NVIDIA_NIM_MODEL)<br><select name="NVIDIA_NIM_MODEL">{options}</select></label>
-  {recent_html}
+  {last_model_html}
   <div style="display:flex;">
     <button type="submit">Save Settings</button>
     <button type="button" class="secondary" onclick="testConnection()">Test Connection</button>
@@ -606,13 +610,12 @@ updateLogs();
                 continue
             updates[k] = val
 
-        # Track recently used models
+        # Track last used model
         if "NVIDIA_NIM_MODEL" in updates:
             values = load_env()
-            recent = values.get("RECENT_MODELS", "").split(",")
-            recent = [m for m in recent if m and m != updates["NVIDIA_NIM_MODEL"]]
-            recent.insert(0, updates["NVIDIA_NIM_MODEL"])
-            updates["RECENT_MODELS"] = ",".join(recent[:10])
+            old_model = values.get("NVIDIA_NIM_MODEL", "")
+            if old_model and old_model != updates["NVIDIA_NIM_MODEL"]:
+                updates["LAST_MODEL"] = old_model
 
         write_env_values(updates)
         self.send_response(303)

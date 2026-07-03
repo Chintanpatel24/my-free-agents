@@ -1,0 +1,272 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="150" height="150">
+  <!-- ============================================= -->
+  <!-- CLAUDE CODE ICON - Happy Animated Character   -->
+  <!-- With running, jumping, hand waving animations -->
+  <!-- Real physics: anticipation, hang time, squash -->
+  <!-- ============================================= -->
+
+  <!-- Ground line reference -->
+  <line x1="0" y1="20.5" x2="24" y2="20.5" stroke="#E8D4C4" stroke-width="0.3" opacity="0.5"/>
+
+  <!-- Dynamic shadow -->
+  <ellipse cx="12" cy="20.5" rx="7" ry="1.2" fill="#5C2E0A" opacity="0.25">
+    <animate attributeName="rx"
+      values="7;7;7;7;7;7;7;7.5;8;4;2.5;2.5;4;6;9;7.5;7;7"
+      keyTimes="0;0.15;0.25;0.30;0.35;0.40;0.45;0.48;0.50;0.55;0.60;0.65;0.70;0.78;0.82;0.86;0.90;1"
+      dur="4s" repeatCount="indefinite"/>
+    <animate attributeName="opacity"
+      values="0.25;0.25;0.25;0.25;0.25;0.25;0.25;0.2;0.15;0.08;0.05;0.05;0.08;0.2;0.35;0.25;0.25;0.25"
+      keyTimes="0;0.15;0.25;0.30;0.35;0.40;0.45;0.48;0.50;0.55;0.60;0.65;0.70;0.78;0.82;0.86;0.90;1"
+      dur="4s" repeatCount="indefinite"/>
+  </ellipse>
+
+  <!-- ============================================= -->
+  <!-- MAIN CHARACTER                                 -->
+  <!-- ============================================= -->
+  <g id="claude-code">
+    
+    <!-- =========================================== -->
+    <!-- JUMP PHYSICS: anticipation, jump, hang, land -->
+    <!-- =========================================== -->
+    <animateTransform attributeName="transform" type="translate"
+      values="0,0; 0,0; 0,0; 0,0; 0,0; 0,0; 0,0; 0,0.8; 0,1.2; 0,-3; 0,-5.5; 0,-6.5; 0,-6.5; 0,-5.5; 0,-3; 0,0; 0,0.5; 0,0; 0,0"
+      keyTimes="0; 0.10; 0.20; 0.28; 0.33; 0.38; 0.45; 0.48; 0.50; 0.54; 0.58; 0.62; 0.66; 0.70; 0.74; 0.80; 0.83; 0.88; 1"
+      calcMode="spline"
+      keySplines="0.4 0 1 1; 0.4 0 1 1; 0.4 0 1 1; 0.4 0 1 1; 0.4 0 1 1; 0.4 0 1 1; 0.4 0 1 1; 0.25 0 0.3 1; 0.1 0 0.2 1; 0.1 0 0.3 1; 0 0 0.5 1; 0.5 0 1 1; 0.5 0 1 1; 0.6 0 1 1; 0.7 0 1 1; 0.5 0 0.8 1; 0.3 0 0.6 1; 0.4 0 0.6 1"
+      dur="4s" repeatCount="indefinite"/>
+
+    <!-- Running/bouncing body movement -->
+    <g id="run-bounce">
+      <animateTransform attributeName="transform" type="translate"
+        values="0,0; 0,-0.4; 0,0.2; 0,-0.5; 0,0.2; 0,-0.4; 0,0.2; 0,-0.5; 0,0; 0,0; 0,0; 0,0; 0,0; 0,0; 0,0; 0,0.8; 0,-0.3; 0,0; 0,0"
+        keyTimes="0; 0.05; 0.10; 0.15; 0.20; 0.25; 0.30; 0.35; 0.42; 0.50; 0.58; 0.66; 0.74; 0.78; 0.80; 0.82; 0.86; 0.92; 1"
+        dur="4s" repeatCount="indefinite"/>
+
+      <!-- Forward tilt while running, backward on jump -->
+      <g id="body-tilt">
+        <animateTransform attributeName="transform" type="rotate"
+          values="0 12 15; 3 12 15; -2 12 15; 4 12 15; -2 12 15; 3 12 15; -2 12 15; 4 12 15; 2 12 15; 0 12 15; -4 12 15; -6 12 15; -6 12 15; -4 12 15; 0 12 15; 2 12 15; 0 12 15; 0 12 15"
+          keyTimes="0; 0.05; 0.10; 0.15; 0.20; 0.25; 0.30; 0.35; 0.45; 0.50; 0.56; 0.62; 0.66; 0.70; 0.76; 0.82; 0.90; 1"
+          dur="4s" repeatCount="indefinite"/>
+
+        <!-- Squash and stretch physics -->
+        <g id="squash-stretch">
+          <!-- Squash on crouch, stretch on jump, squash on land -->
+          <animateTransform attributeName="transform" type="scale"
+            values="1 1; 1 1; 1 1; 1 1; 1 1; 1 1; 1 1; 1.08 0.92; 1.12 0.88; 0.92 1.12; 0.88 1.16; 0.90 1.12; 0.90 1.12; 0.92 1.10; 0.95 1.06; 1.10 0.90; 1.06 0.94; 0.97 1.04; 1 1"
+            keyTimes="0; 0.10; 0.20; 0.30; 0.38; 0.42; 0.46; 0.48; 0.50; 0.53; 0.58; 0.62; 0.66; 0.70; 0.76; 0.80; 0.83; 0.88; 1"
+            dur="4s" repeatCount="indefinite"/>
+
+          <!-- Breathing idle -->
+          <g id="breathing">
+            <animateTransform attributeName="transform" type="scale"
+              values="1 1; 1.006 1.01; 1 1; 0.996 0.994; 1 1"
+              dur="2s" repeatCount="indefinite" additive="sum"/>
+
+            <!-- ======================================= -->
+            <!-- MAIN BODY (no eye rectangles)           -->
+            <!-- ======================================= -->
+            <path id="body" d="
+              M20.998 10.949 H24 v3.102 h-3 v3.028 h-1.487 V20 H18 v-2.921 h-1.487 V20 H15 v-2.921 H9 V20 H7.488 v-2.921 H6 V20 H4.487 v-2.921 H3 V14.05 H0 V10.95 h3 V5 h17.998 v5.949 z"
+              fill="#D97757" fill-rule="evenodd"/>
+
+            <!-- Highlight on body -->
+            <rect x="4" y="5.5" width="8" height="1" rx="0.3" fill="#E8956B" opacity="0.5"/>
+
+            <!-- Happy expression - simple smile -->
+            <path d="M9.5 12 Q12 13.8 14.5 12" fill="none" stroke="#FFF5E6" stroke-width="0.5" stroke-linecap="round" opacity="0.9">
+              <!-- Smile gets bigger when jumping (happy!) -->
+              <animate attributeName="d"
+                values="M9.5 12 Q12 13.8 14.5 12; M9.5 12 Q12 13.8 14.5 12; M9.5 12 Q12 13.8 14.5 12; M9 11.5 Q12 14.5 15 11.5; M9 11.5 Q12 14.5 15 11.5; M9 11.5 Q12 14.5 15 11.5; M9.5 12 Q12 13.8 14.5 12; M9.5 12 Q12 13.8 14.5 12"
+                keyTimes="0; 0.35; 0.48; 0.55; 0.65; 0.75; 0.85; 1"
+                dur="4s" repeatCount="indefinite"/>
+            </path>
+
+          </g><!-- end breathing -->
+        </g><!-- end squash-stretch -->
+      </g><!-- end body-tilt -->
+    </g><!-- end run-bounce -->
+
+    <!-- ======================================= -->
+    <!-- LEFT HAND (was left eye rectangle)      -->
+    <!-- Now animates like a waving/swinging arm -->
+    <!-- ======================================= -->
+    <g id="left-hand">
+      <!-- Complex hand animation: idle wave, run swing, jump reach -->
+      <animateTransform attributeName="transform" type="translate"
+        values="0,0; -0.3,-0.8; 0.2,0.3; -0.4,-0.6; 0.2,0.3; -0.3,-0.8; 0.2,0.3; -0.4,-0.6; 0,0; -0.5,-1; -1,-2.5; -1.5,-3.5; -1.5,-3.5; -1,-2.5; -0.3,-0.8; 0.3,0.5; 0,0; 0,0"
+        keyTimes="0; 0.05; 0.10; 0.15; 0.20; 0.25; 0.30; 0.35; 0.45; 0.50; 0.56; 0.62; 0.66; 0.70; 0.76; 0.82; 0.90; 1"
+        dur="4s" repeatCount="indefinite"/>
+      
+      <animateTransform attributeName="transform" type="rotate"
+        values="0 6.7 9.5; -15 6.7 9.5; 10 6.7 9.5; -20 6.7 9.5; 10 6.7 9.5; -15 6.7 9.5; 10 6.7 9.5; -20 6.7 9.5; -5 6.7 9.5; -25 6.7 9.5; -40 6.7 9.5; -50 6.7 9.5; -50 6.7 9.5; -40 6.7 9.5; -20 6.7 9.5; 15 6.7 9.5; 5 6.7 9.5; 0 6.7 9.5"
+        keyTimes="0; 0.05; 0.10; 0.15; 0.20; 0.25; 0.30; 0.35; 0.45; 0.50; 0.56; 0.62; 0.66; 0.70; 0.76; 0.82; 0.90; 1"
+        dur="4s" repeatCount="indefinite" additive="sum"/>
+
+      <!-- The hand shape -->
+      <rect x="6" y="8.102" width="1.488" height="2.847" rx="0.3" fill="#FFF5E6" stroke="#D97757" stroke-width="0.15">
+        <!-- Hand stretches when reaching up -->
+        <animate attributeName="height"
+          values="2.847; 2.847; 2.847; 2.847; 2.847; 2.847; 2.847; 2.847; 2.847; 3.2; 3.5; 3.8; 3.8; 3.5; 3; 2.5; 2.847; 2.847"
+          keyTimes="0; 0.10; 0.20; 0.30; 0.38; 0.42; 0.46; 0.48; 0.50; 0.54; 0.58; 0.62; 0.66; 0.70; 0.76; 0.82; 0.90; 1"
+          dur="4s" repeatCount="indefinite"/>
+      </rect>
+      
+      <!-- Finger detail on hand -->
+      <rect x="6.2" y="8.3" width="0.4" height="0.8" rx="0.15" fill="#E8C4A8" opacity="0.6"/>
+      <rect x="6.85" y="8.3" width="0.4" height="0.8" rx="0.15" fill="#E8C4A8" opacity="0.6"/>
+    </g>
+
+    <!-- ======================================= -->
+    <!-- RIGHT HAND (was right eye rectangle)    -->
+    <!-- Opposite swing to left hand             -->
+    <!-- ======================================= -->
+    <g id="right-hand">
+      <!-- Opposite phase for natural running motion -->
+      <animateTransform attributeName="transform" type="translate"
+        values="0,0; 0.3,0.3; -0.2,-0.6; 0.4,0.3; -0.2,-0.6; 0.3,0.3; -0.2,-0.6; 0.4,0.3; 0,0; 0.5,-1; 1,-2.5; 1.5,-3.5; 1.5,-3.5; 1,-2.5; 0.3,-0.8; -0.3,0.5; 0,0; 0,0"
+        keyTimes="0; 0.05; 0.10; 0.15; 0.20; 0.25; 0.30; 0.35; 0.45; 0.50; 0.56; 0.62; 0.66; 0.70; 0.76; 0.82; 0.90; 1"
+        dur="4s" repeatCount="indefinite"/>
+
+      <animateTransform attributeName="transform" type="rotate"
+        values="0 17.25 9.5; 15 17.25 9.5; -10 17.25 9.5; 20 17.25 9.5; -10 17.25 9.5; 15 17.25 9.5; -10 17.25 9.5; 20 17.25 9.5; 5 17.25 9.5; 25 17.25 9.5; 40 17.25 9.5; 50 17.25 9.5; 50 17.25 9.5; 40 17.25 9.5; 20 17.25 9.5; -15 17.25 9.5; -5 17.25 9.5; 0 17.25 9.5"
+        keyTimes="0; 0.05; 0.10; 0.15; 0.20; 0.25; 0.30; 0.35; 0.45; 0.50; 0.56; 0.62; 0.66; 0.70; 0.76; 0.82; 0.90; 1"
+        dur="4s" repeatCount="indefinite" additive="sum"/>
+
+      <!-- The hand shape -->
+      <rect x="16.51" y="8.102" width="1.49" height="2.847" rx="0.3" fill="#FFF5E6" stroke="#D97757" stroke-width="0.15">
+        <animate attributeName="height"
+          values="2.847; 2.847; 2.847; 2.847; 2.847; 2.847; 2.847; 2.847; 2.847; 3.2; 3.5; 3.8; 3.8; 3.5; 3; 2.5; 2.847; 2.847"
+          keyTimes="0; 0.10; 0.20; 0.30; 0.38; 0.42; 0.46; 0.48; 0.50; 0.54; 0.58; 0.62; 0.66; 0.70; 0.76; 0.82; 0.90; 1"
+          dur="4s" repeatCount="indefinite"/>
+      </rect>
+
+      <!-- Finger detail -->
+      <rect x="16.7" y="8.3" width="0.4" height="0.8" rx="0.15" fill="#E8C4A8" opacity="0.6"/>
+      <rect x="17.35" y="8.3" width="0.4" height="0.8" rx="0.15" fill="#E8C4A8" opacity="0.6"/>
+    </g>
+
+  </g><!-- end claude-code -->
+
+  <!-- ======================================= -->
+  <!-- RUNNING DUST PUFFS                      -->
+  <!-- ======================================= -->
+  <g id="run-dust" opacity="0.5">
+    <!-- Left foot dust -->
+    <circle cx="6" cy="20" r="0.8" fill="#E8C4A8">
+      <animate attributeName="opacity"
+        values="0; 0.6; 0; 0; 0.6; 0; 0; 0.6; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0"
+        keyTimes="0; 0.03; 0.08; 0.10; 0.13; 0.18; 0.20; 0.23; 0.28; 0.35; 0.45; 0.55; 0.65; 0.75; 0.82; 0.88; 0.94; 1"
+        dur="4s" repeatCount="indefinite"/>
+      <animate attributeName="cx"
+        values="6; 4; 2; 6; 4; 2; 6; 4; 2; 6; 6; 6; 6; 6; 6; 6; 6; 6"
+        keyTimes="0; 0.03; 0.08; 0.10; 0.13; 0.18; 0.20; 0.23; 0.28; 0.35; 0.45; 0.55; 0.65; 0.75; 0.82; 0.88; 0.94; 1"
+        dur="4s" repeatCount="indefinite"/>
+      <animate attributeName="cy"
+        values="20; 19.5; 19; 20; 19.5; 19; 20; 19.5; 19; 20; 20; 20; 20; 20; 20; 20; 20; 20"
+        keyTimes="0; 0.03; 0.08; 0.10; 0.13; 0.18; 0.20; 0.23; 0.28; 0.35; 0.45; 0.55; 0.65; 0.75; 0.82; 0.88; 0.94; 1"
+        dur="4s" repeatCount="indefinite"/>
+    </circle>
+
+    <!-- Right foot dust -->
+    <circle cx="18" cy="20" r="0.8" fill="#E8C4A8">
+      <animate attributeName="opacity"
+        values="0; 0; 0; 0.6; 0; 0; 0; 0; 0.6; 0; 0; 0; 0; 0; 0; 0; 0; 0"
+        keyTimes="0; 0.03; 0.08; 0.10; 0.13; 0.18; 0.20; 0.25; 0.28; 0.35; 0.45; 0.55; 0.65; 0.75; 0.82; 0.88; 0.94; 1"
+        dur="4s" repeatCount="indefinite"/>
+      <animate attributeName="cx"
+        values="18; 18; 18; 20; 22; 18; 18; 18; 20; 22; 18; 18; 18; 18; 18; 18; 18; 18"
+        keyTimes="0; 0.03; 0.08; 0.10; 0.13; 0.18; 0.20; 0.25; 0.28; 0.35; 0.45; 0.55; 0.65; 0.75; 0.82; 0.88; 0.94; 1"
+        dur="4s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+
+  <!-- ======================================= -->
+  <!-- JUMP EXCITEMENT PARTICLES               -->
+  <!-- ======================================= -->
+  <g id="jump-particles" opacity="0">
+    <animate attributeName="opacity"
+      values="0;0;0;0;0;0;0;0;0;0;0.9;0.7;0.5;0.3;0;0;0;0"
+      keyTimes="0;0.10;0.20;0.30;0.40;0.45;0.48;0.50;0.52;0.55;0.58;0.62;0.66;0.70;0.75;0.85;0.92;1"
+      dur="4s" repeatCount="indefinite"/>
+
+    <!-- Star burst particles -->
+    <polygon points="3,8 3.3,9 4.3,9 3.5,9.6 3.8,10.6 3,10 2.2,10.6 2.5,9.6 1.7,9 2.7,9" fill="#FFD700">
+      <animate attributeName="transform" type="translate"
+        values="0,0; -2,-3; -4,-5" dur="4s" repeatCount="indefinite"/>
+    </polygon>
+    <polygon points="21,8 21.3,9 22.3,9 21.5,9.6 21.8,10.6 21,10 20.2,10.6 20.5,9.6 19.7,9 20.7,9" fill="#FFD700">
+      <animate attributeName="transform" type="translate"
+        values="0,0; 2,-3; 4,-5" dur="4s" repeatCount="indefinite"/>
+    </polygon>
+
+    <!-- Small circles -->
+    <circle cx="5" cy="6" r="0.5" fill="#F4C088">
+      <animate attributeName="cy" values="6;3;1" dur="4s" repeatCount="indefinite"/>
+      <animate attributeName="cx" values="5;3;1" dur="4s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="19" cy="6" r="0.5" fill="#F4C088">
+      <animate attributeName="cy" values="6;3;1" dur="4s" repeatCount="indefinite"/>
+      <animate attributeName="cx" values="19;21;23" dur="4s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="12" cy="3" r="0.4" fill="#FFE4B5">
+      <animate attributeName="cy" values="3;0;-2" dur="4s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+
+  <!-- ======================================= -->
+  <!-- LANDING IMPACT EFFECT                   -->
+  <!-- ======================================= -->
+  <g id="landing-dust" opacity="0">
+    <animate attributeName="opacity"
+      values="0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0.8;0.4;0;0"
+      keyTimes="0;0.10;0.20;0.30;0.40;0.50;0.55;0.60;0.65;0.70;0.74;0.76;0.78;0.79;0.80;0.81;0.85;0.90;1"
+      dur="4s" repeatCount="indefinite"/>
+
+    <!-- Left dust cloud -->
+    <ellipse cx="6" cy="20" rx="2" ry="0.8" fill="#DEB887">
+      <animate attributeName="cx" values="6;3;0" dur="4s" repeatCount="indefinite"/>
+      <animate attributeName="rx" values="2;3;4" dur="4s" repeatCount="indefinite"/>
+      <animate attributeName="ry" values="0.8;1.2;0.5" dur="4s" repeatCount="indefinite"/>
+    </ellipse>
+
+    <!-- Right dust cloud -->
+    <ellipse cx="18" cy="20" rx="2" ry="0.8" fill="#DEB887">
+      <animate attributeName="cx" values="18;21;24" dur="4s" repeatCount="indefinite"/>
+      <animate attributeName="rx" values="2;3;4" dur="4s" repeatCount="indefinite"/>
+      <animate attributeName="ry" values="0.8;1.2;0.5" dur="4s" repeatCount="indefinite"/>
+    </ellipse>
+
+    <!-- Center poof -->
+    <ellipse cx="12" cy="20" rx="3" ry="1" fill="#F5DEB3">
+      <animate attributeName="cy" values="20;18;17" dur="4s" repeatCount="indefinite"/>
+      <animate attributeName="ry" values="1;1.5;0.3" dur="4s" repeatCount="indefinite"/>
+    </ellipse>
+
+    <!-- Impact lines -->
+    <line x1="8" y1="19" x2="6" y2="17" stroke="#D97757" stroke-width="0.4" stroke-linecap="round">
+      <animate attributeName="x2" values="6;4;2" dur="4s" repeatCount="indefinite"/>
+      <animate attributeName="y2" values="17;15;14" dur="4s" repeatCount="indefinite"/>
+    </line>
+    <line x1="16" y1="19" x2="18" y2="17" stroke="#D97757" stroke-width="0.4" stroke-linecap="round">
+      <animate attributeName="x2" values="18;20;22" dur="4s" repeatCount="indefinite"/>
+      <animate attributeName="y2" values="17;15;14" dur="4s" repeatCount="indefinite"/>
+    </line>
+  </g>
+
+  <!-- ======================================= -->
+  <!-- MOTION LINES (speed effect)             -->
+  <!-- ======================================= -->
+  <g id="motion-lines" opacity="0">
+    <animate attributeName="opacity"
+      values="0.4;0.4;0.4;0.4;0.4;0.4;0.4;0.4;0.2;0;0;0;0;0;0;0;0;0.4"
+      keyTimes="0;0.05;0.10;0.15;0.20;0.25;0.30;0.35;0.42;0.48;0.55;0.65;0.75;0.80;0.85;0.90;0.95;1"
+      dur="4s" repeatCount="indefinite"/>
+
+    <line x1="0" y1="10" x2="2" y2="10" stroke="#D97757" stroke-width="0.3" stroke-linecap="round"/>
+    <line x1="-1" y1="12" x2="1.5" y2="12" stroke="#D97757" stroke-width="0.25" stroke-linecap="round"/>
+    <line x1="0" y1="14" x2="2.5" y2="14" stroke="#D97757" stroke-width="0.3" stroke-linecap="round"/>
+    <line x1="-0.5" y1="16" x2="1" y2="16" stroke="#D97757" stroke-width="0.2" stroke-linecap="round"/>
+  </g>
+
+</svg>

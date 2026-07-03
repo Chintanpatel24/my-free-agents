@@ -11,15 +11,22 @@
 <div align=center>
 <image src="assets/working-fine.png" alt="claudecode-woring-image">
 </div>
-   
-## Features
 
-- **NVIDIA NIM Support**: Use any model available in the NVIDIA NIM API.
-- **Auto-Config**: Installation script asks for your API key and sets everything up.
-- **Model Selection**: Shows all NVIDIA NIM models directly in Claude Code via `/models`.
-- **Default GLM**: Uses GLM 5.1 as the default model for a smooth experience.
-- **Local Proxy**: Runs a lightweight server at `http://127.0.0.1:2424`.
+## Table of contents
 
+- [Providers](#Providers)
+- [Installation](#Installation)
+- [Installation using pip](#Installation-using-pip)
+- [Update](#Update)
+- [How to Use](#How-to-Use)
+- [Configuration](#Configuration)
+
+
+<a name="Providers"></a>
+## Providers
+- [**NVIDIA NIM**](https://build.nvidia.com/explore/discover)
+
+<a name="Installation"></a>
 ## Installation
 
 ### Linux/MacOS
@@ -34,12 +41,14 @@ Run the following command in PowerShell:
 irm https://raw.githubusercontent.com/Chintanpatel24/my-free-claudecode/main/install.ps1 | iex
 ```
 
+<a name="Installation-using-pip"></a>
 ### Python (pip)
 Alternatively, you can install it as a Python package:
 ```bash
 pip install git+https://github.com/Chintanpatel24/my-free-claudecode.git
 ```
 
+<a name="Update"></a>
 ## Update
 
 To update to the latest version, run the following command:
@@ -54,6 +63,7 @@ curl -fsSL https://raw.githubusercontent.com/Chintanpatel24/my-free-claudecode/m
 irm https://raw.githubusercontent.com/Chintanpatel24/my-free-claudecode/main/update.ps1 | iex
 ```
 
+<a name="How-to-Use"></a>
 ## How to Use
 
 1. **Start the Proxy Server**:
@@ -76,6 +86,8 @@ irm https://raw.githubusercontent.com/Chintanpatel24/my-free-claudecode/main/upd
         <summary>Admin panel</summary>
         <p><image src="assets/model.png" width="300"></p>
      </details>
+
+<a name="Configuration"></a>
 ## Configuration
 
 If you need to change your API key later, you can:

@@ -25,6 +25,8 @@
 ## Providers
 - [**NVIDIA NIM**](https://build.nvidia.com/explore/discover)
 
+---
+
 <a name="Installation"></a>
 ## Installation
 
@@ -47,6 +49,8 @@ Alternatively, you can install it as a Python package:
 pip install git+https://github.com/Chintanpatel24/my-free-claudecode.git
 ```
 
+---
+
 <a name="Update"></a>
 ## Update
 
@@ -61,6 +65,8 @@ curl -fsSL https://raw.githubusercontent.com/Chintanpatel24/my-free-claudecode/m
 ```powershell
 irm https://raw.githubusercontent.com/Chintanpatel24/my-free-claudecode/main/update.ps1 | iex
 ```
+
+---
 
 <a name="How-to-Use"></a>
 ## How to Use
@@ -85,6 +91,8 @@ irm https://raw.githubusercontent.com/Chintanpatel24/my-free-claudecode/main/upd
         <summary>Admin panel</summary>
         <p><image src="assets/model.png" width="300"></p>
      </details>
+
+---
 
 <a name="Configuration"></a>
 ## Configuration

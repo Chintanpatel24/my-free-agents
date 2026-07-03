@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import collections
 import html
 import json
 import sys
@@ -17,6 +18,8 @@ from .anthropic import build_openai_request, estimate_tokens, openai_to_anthropi
 from .config import DEFAULT_HOST, DEFAULT_NVIDIA_NIM_BASE_URL, DEFAULT_PORT, get_provider, load_env, write_env_values
 
 SENSITIVE_KEYS = ("API", "API_KEY")
+
+LOG_QUEUE: collections.deque[str] = collections.deque(maxlen=50)
 
 # Used only if NVIDIA's /models endpoint is temporarily unavailable. The real
 # /models response is preferred whenever the user's key can access it.
@@ -223,10 +226,12 @@ def selected_upstream_model(body: Dict[str, Any], provider, values: Dict[str, st
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "FreeClaudeCode/1.0"
+    server_version = "FreeClaudeCode/1.1"
 
     def log_message(self, fmt, *args):
-        sys.stderr.write("[%s] %s\n" % (self.log_date_time_string(), fmt % args))
+        msg = "[%s] %s" % (self.log_date_time_string(), fmt % args)
+        sys.stderr.write(msg + "\n")
+        LOG_QUEUE.append(msg)
 
     def _send(self, status: int, data: Any, headers: Optional[Dict[str, str]] = None):
         raw = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -282,6 +287,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(500, {"type": "error", "error": {"type": "models_error", "message": str(e)}})
         if path == "/admin":
             return self._admin_get()
+        if path == "/admin/logs":
+            return self._send(200, {"logs": list(LOG_QUEUE)})
         return self._send(404, {"type": "error", "error": {"type": "not_found", "message": path}})
 
     def do_POST(self):
@@ -296,6 +303,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._messages()
         if path == "/admin":
             return self._admin_post()
+        if path == "/admin/test":
+            return self._admin_test()
         return self._send(404, {"type": "error", "error": {"type": "not_found", "message": path}})
 
     def _messages(self):
@@ -313,7 +322,21 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, openai_to_anthropic(data, body.get("model") or values.get("ANTHROPIC_MODEL", "free-claude-code")))
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "replace")
-            return self._send(e.code, {"type": "error", "error": {"type": "upstream_error", "message": detail[:4000]}})
+            try:
+                # Try to extract a cleaner message from JSON if possible
+                err_obj = json.loads(detail)
+                if "detail" in err_obj:
+                    detail = err_obj["detail"]
+                elif "error" in err_obj and "message" in err_obj["error"]:
+                    detail = err_obj["error"]["message"]
+            except:
+                pass
+            msg = f"NVIDIA NIM Error ({e.code}): {detail}"
+            if e.code == 401:
+                msg = "NVIDIA NIM API Key is invalid or expired (401 Unauthorized). Please check your settings in the Admin UI."
+            elif e.code == 404:
+                msg = f"Model '{upstream_model}' not found or not accessible with your API key (404 Not Found)."
+            return self._send(e.code, {"type": "error", "error": {"type": "upstream_error", "message": msg[:4000]}})
         except Exception as e:
             return self._send(500, {"type": "error", "error": {"type": "proxy_error", "message": str(e)}})
 
@@ -410,6 +433,8 @@ class Handler(BaseHTTPRequestHandler):
         provider = get_provider(values)
         api_value = provider.api_key or ""
         current_model = provider.model
+        recent_models = values.get("RECENT_MODELS", "").split(",")
+        recent_models = [m for m in recent_models if m]
 
         models = []
         try:
@@ -425,18 +450,145 @@ class Handler(BaseHTTPRequestHandler):
 
         options = "".join(f'<option value="{html.escape(m)}"{ " selected" if m == current_model else ""}>{html.escape(m)}</option>' for m in models)
 
+        recent_html = ""
+        if recent_models:
+            recent_html = "<h3>Recently Used Models</h3><div style='margin-bottom:1rem;'>"
+            for rm in recent_models[:5]:
+                recent_html += f'<button type="button" style="margin-right:0.5rem;margin-bottom:0.5rem;padding:0.4rem 0.8rem;font-size:0.8rem;" onclick="document.getElementsByName(\'NVIDIA_NIM_MODEL\')[0].value=\'{html.escape(rm)}\'">{html.escape(rm)}</button>'
+            recent_html += "</div>"
+
         html_doc = f"""<!doctype html><html><head><meta charset="utf-8"><title>My ClaudeCode Server Admin</title>
-<style>body{{font-family:system-ui;margin:2rem;max-width:760px}}input,select{{width:100%;padding:.7rem;margin:.25rem 0 1rem}}section{{border:1px solid #ddd;border-radius:10px;padding:1rem;margin:1rem 0}}button{{padding:.8rem 1.2rem}}code{{background:#eee;padding:.2rem}}</style></head><body>
-<h1>My ClaudeCode Server /admin</h1><p>NVIDIA NIM-only settings. The .env file stores <code>NVIDIA_NIM_API</code> and <code>NVIDIA_NIM_MODEL</code>.</p>
-<form method="post">
-<section><h3>NVIDIA NIM Settings</h3>
-<label>NVIDIA_NIM_API<input name="NVIDIA_NIM_API" value="{html.escape(mask(api_value))}" placeholder="your-api-key"></label>
-<label>Default Model (NVIDIA_NIM_MODEL)<br><select name="NVIDIA_NIM_MODEL">{options}</select></label>
+<style>
+  :root {{ --bg: #fff; --text: #333; --border: #ddd; --section: #f9f9f9; --btn: #007bff; --btn-text: #fff; --code-bg: #eee; }}
+  @media (prefers-color-scheme: dark) {{
+    :root {{ --bg: #1e1e1e; --text: #e0e0e0; --border: #444; --section: #2d2d2d; --btn: #375a7f; --btn-text: #fff; --code-bg: #333; }}
+  }}
+  body {{ font-family: system-ui, -apple-system, sans-serif; margin: 2rem auto; max-width: 800px; line-height: 1.5; background: var(--bg); color: var(--text); padding: 0 1rem; }}
+  input, select {{ width: 100%; padding: .7rem; margin: .25rem 0 1.5rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); box-sizing: border-box; }}
+  section {{ border: 1px solid var(--border); border-radius: 10px; padding: 1.5rem; margin: 1.5rem 0; background: var(--section); }}
+  button {{ padding: .8rem 1.2rem; border: none; border-radius: 6px; background: var(--btn); color: var(--btn-text); cursor: pointer; font-weight: 600; }}
+  button:hover {{ opacity: 0.9; }}
+  button.secondary {{ background: #6c757d; margin-left: 0.5rem; }}
+  code {{ background: var(--code-bg); padding: .2rem .4rem; border-radius: 4px; }}
+  h1, h2, h3 {{ margin-top: 0; }}
+  .logs {{ background: #000; color: #00ff00; padding: 1rem; border-radius: 6px; font-family: monospace; height: 200px; overflow-y: auto; font-size: 0.85rem; border: 1px solid #444; }}
+  .status {{ margin-top: 1rem; font-weight: bold; padding: 0.5rem; border-radius: 4px; display: none; }}
+  .status.success {{ background: #28a745; color: #fff; display: block; }}
+  .status.error {{ background: #dc3545; color: #fff; display: block; }}
+</style></head><body>
+<h1>My ClaudeCode Admin Panel</h1>
+<p>NVIDIA NIM proxy configuration and monitoring.</p>
+
+<form id="configForm" method="post">
+<section>
+  <h3>NVIDIA NIM Settings</h3>
+  <label>NVIDIA_NIM_API<input name="NVIDIA_NIM_API" value="{html.escape(mask(api_value))}" placeholder="your-api-key"></label>
+  <label>Default Model (NVIDIA_NIM_MODEL)<br><select name="NVIDIA_NIM_MODEL">{options}</select></label>
+  {recent_html}
+  <div style="display:flex;">
+    <button type="submit">Save Settings</button>
+    <button type="button" class="secondary" onclick="testConnection()">Test Connection</button>
+  </div>
+  <div id="testStatus" class="status"></div>
 </section>
-<button type="submit">Save Settings</button></form>
-<p>Server URL: <code>http://{html.escape(values.get('HOST', DEFAULT_HOST))}:{html.escape(values.get('PORT', DEFAULT_PORT))}</code></p>
-<p>Models endpoint: <code>/v1/models</code> shows NVIDIA NIM model ids only.</p></body></html>"""
+</form>
+
+<section>
+  <h3>Live Activity Logs</h3>
+  <div id="logViewer" class="logs">Loading logs...</div>
+</section>
+
+<section>
+  <h3>System Info</h3>
+  <p>Server URL: <code>http://{html.escape(values.get('HOST', DEFAULT_HOST))}:{html.escape(values.get('PORT', DEFAULT_PORT))}</code></p>
+  <p>Models endpoint: <code>/v1/models</code> (shows NVIDIA NIM model ids only)</p>
+</section>
+
+<script>
+async function testConnection() {{
+  const status = document.getElementById('testStatus');
+  status.className = 'status';
+  status.textContent = 'Testing connection...';
+  status.style.display = 'block';
+
+  const form = document.getElementById('configForm');
+  const formData = new FormData(form);
+  const data = {{}};
+  formData.forEach((value, key) => data[key] = value);
+
+  try {{
+    const resp = await fetch('/admin/test', {{
+      method: 'POST',
+      headers: {{ 'Content-Type': 'application/json' }},
+      body: JSON.stringify(data)
+    }});
+    const result = await resp.json();
+    if (result.ok) {{
+      status.className = 'status success';
+      status.textContent = '✅ Success: Connection verified and model is accessible.';
+    }} else {{
+      status.className = 'status error';
+      status.textContent = '❌ Error: ' + result.message;
+    }}
+  }} catch (e) {{
+    status.className = 'status error';
+    status.textContent = '❌ Error: ' + e.message;
+  }}
+}}
+
+async function updateLogs() {{
+  try {{
+    const resp = await fetch('/admin/logs');
+    const data = await resp.json();
+    const viewer = document.getElementById('logViewer');
+    const atBottom = viewer.scrollHeight - viewer.scrollTop <= viewer.clientHeight + 10;
+    viewer.textContent = data.logs.join('\\n');
+    if (atBottom) viewer.scrollTop = viewer.scrollHeight;
+  }} catch (e) {{}}
+}}
+
+setInterval(updateLogs, 2000);
+updateLogs();
+</script>
+</body></html>"""
         return self._send_text(200, html_doc)
+
+    def _admin_test(self):
+        if not self._is_loopback():
+            return self._send(403, {"ok": False, "message": "Admin UI is only available from localhost"})
+        try:
+            data = self._read_json()
+            values = load_env()
+            api_key = data.get("NVIDIA_NIM_API", "")
+            # If the value is masked, use the one from env.
+            if "…" in api_key:
+                api_key = get_provider(values).api_key
+
+            model = data.get("NVIDIA_NIM_MODEL", values.get("NVIDIA_NIM_MODEL", DEFAULT_NVIDIA_NIM_MODEL))
+
+            if not api_key or api_key == "your-api-key":
+                return self._send(200, {"ok": False, "message": "API key is missing"})
+
+            # Simple test: call /models
+            url = f"{DEFAULT_NVIDIA_NIM_BASE_URL}/models"
+            req = urllib.request.Request(url, headers={"Authorization": f"Bearer {api_key}"}, method="GET")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                models_data = json.loads(resp.read().decode("utf-8"))
+                available_models = extract_model_ids(models_data)
+                if model in available_models:
+                    return self._send(200, {"ok": True})
+                else:
+                    return self._send(200, {"ok": False, "message": f"Model '{model}' not found in your account's available models."})
+        except urllib.error.HTTPError as e:
+            msg = str(e)
+            try:
+                msg = e.read().decode("utf-8")
+                err_data = json.loads(msg)
+                if "detail" in err_data: msg = err_data["detail"]
+            except: pass
+            return self._send(200, {"ok": False, "message": f"NVIDIA API Error: {msg}"})
+        except Exception as e:
+            return self._send(200, {"ok": False, "message": str(e)})
 
     def _admin_post(self):
         if not self._is_loopback():
@@ -453,6 +605,15 @@ class Handler(BaseHTTPRequestHandler):
             if k == "NVIDIA_NIM_API" and "…" in val:
                 continue
             updates[k] = val
+
+        # Track recently used models
+        if "NVIDIA_NIM_MODEL" in updates:
+            values = load_env()
+            recent = values.get("RECENT_MODELS", "").split(",")
+            recent = [m for m in recent if m and m != updates["NVIDIA_NIM_MODEL"]]
+            recent.insert(0, updates["NVIDIA_NIM_MODEL"])
+            updates["RECENT_MODELS"] = ",".join(recent[:10])
+
         write_env_values(updates)
         self.send_response(303)
         self.send_header("Location", "/admin")

@@ -24,10 +24,10 @@ $exclude = @('.git','.env','__pycache__','.venv','dist','build')
 Get-ChildItem -Path $SrcDir -Force | ForEach-Object { if ($exclude -notcontains $_.Name -and -not $_.Name.EndsWith('.egg-info')) { Copy-Item $_.FullName -Destination $InstallDir -Recurse -Force } }
 if ($SavedEnv) { Set-Content -Path $ExistingEnv -Value $SavedEnv -Encoding UTF8 }
 
-Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $BinDir 'my-free-claudecode.cmd'), (Join-Path $BinDir 'my-free-claudecode.ps1')
-$shimCmd1 = Join-Path $BinDir 'my-claudecode-server.cmd'
+Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $BinDir 'my-free-claudecode.cmd'), (Join-Path $BinDir 'my-free-claudecode.ps1'), (Join-Path $BinDir 'my-claudecode-server.cmd'), (Join-Path $BinDir 'my-claudecode-server.ps1')
+$shimCmd1 = Join-Path $BinDir 'my-server-claudecode.cmd'
 $shimCmd2 = Join-Path $BinDir 'my-claudecode.cmd'
-$shimPs1A = Join-Path $BinDir 'my-claudecode-server.ps1'
+$shimPs1A = Join-Path $BinDir 'my-server-claudecode.ps1'
 $shimPs1B = Join-Path $BinDir 'my-claudecode.ps1'
 Set-Content -Path $shimCmd1 -Encoding ASCII -Value "@echo off`r`nset FREE_CLAUDE_CODE_HOME=$InstallDir`r`nset PYTHONPATH=$InstallDir;%PYTHONPATH%`r`n$Python -c `"from free_claude_code.cli import main_server; main_server()`" %*`r`n"
 Set-Content -Path $shimCmd2 -Encoding ASCII -Value "@echo off`r`nset FREE_CLAUDE_CODE_HOME=$InstallDir`r`nset PYTHONPATH=$InstallDir;%PYTHONPATH%`r`n$Python -c `"from free_claude_code.cli import main_claude; main_claude()`" %*`r`n"
@@ -93,6 +93,6 @@ if ($UserApiKey -and $UserApiKey -ne $ExistingApiKey) {
 }
 
 Write-Host '`nNext steps:'
-Write-Host '  1. Start server: my-claudecode-server'
+Write-Host '  1. Start server: my-server-claudecode'
 Write-Host '  2. Open admin UI (optional): http://127.0.0.1:2424/admin'
 Write-Host '  3. New terminal: my-claudecode'

@@ -179,6 +179,14 @@ def models_response(provider, values: Dict[str, str]) -> Dict[str, Any]:
                 ordered.append(mid)
     # Last safety filter: never return Anthropic/Claude ids from this proxy.
     ordered = [m for m in ordered if m and not m.startswith("claude-") and "anthropic" not in m.lower()]
+
+    # Ensure the default GLM model is at the top of the list.
+    if provider.model in ordered:
+        ordered.remove(provider.model)
+        ordered.insert(0, provider.model)
+    elif provider.model:
+        ordered.insert(0, provider.model)
+
     sys.stderr.write(f"[models] returning {len(ordered)} NVIDIA models from {source}\n")
     items = [{
         "id": mid,

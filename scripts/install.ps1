@@ -51,7 +51,27 @@ Say 'Installed commands:'
 Write-Host "  $shimCmd1"
 Write-Host "  $shimCmd2"
 Say "Config file: $ExistingEnv"
-Write-Host 'Next steps:'
+
+# Prompt for API Key
+$UserApiKey = Read-Host "`nPlease enter your NVIDIA NIM API key"
+
+if ($UserApiKey) {
+    Say "Validating API key..."
+    try {
+        $headers = @{ "Authorization" = "Bearer $UserApiKey" }
+        $resp = Invoke-WebRequest -Uri "https://integrate.api.nvidia.com/v1/models" -Headers $headers -Method Get -UseBasicParsing -ErrorAction Stop
+        if ($resp.StatusCode -eq 200) {
+            & $Python -c "from free_claude_code.config import write_env_values; write_env_values({'NVIDIA_NIM_API': '$UserApiKey'})"
+            Say "API key validated and saved."
+        }
+    } catch {
+        Warn "API key validation failed. You can set it later in $ExistingEnv or via the admin UI."
+    }
+} else {
+    Warn "No API key entered. You can set it later in $ExistingEnv or via the admin UI."
+}
+
+Write-Host '`nNext steps:'
 Write-Host '  1. Start server: my-claudecode-server'
-Write-Host '  2. Open admin UI: http://127.0.0.1:3456/admin'
+Write-Host '  2. Open admin UI (optional): http://127.0.0.1:2424/admin'
 Write-Host '  3. New terminal: my-claudecode'

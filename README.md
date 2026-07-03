@@ -52,6 +52,3 @@ If you need to change your API key later, you can:
   ```bash
   my-claudecode-server --set-key your-nvapi-key
   ```
-
----
-*Note: This project is not affiliated with Anthropic or NVIDIA.*

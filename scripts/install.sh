@@ -81,8 +81,27 @@ esac
 say "Installed commands:"
 printf '  %s\n' "$BIN_DIR/my-claudecode-server" "$BIN_DIR/my-claudecode"
 say "Config file: $ENV_FILE"
+
+# Prompt for API Key
+printf '\n\033[1;34m%s\033[0m ' "Please enter your NVIDIA NIM API key:"
+read -r USER_API_KEY
+
+if [ -n "$USER_API_KEY" ]; then
+    say "Validating API key..."
+    # Simple validation check using curl to fetch models
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $USER_API_KEY" "https://integrate.api.nvidia.com/v1/models")
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        FREE_CLAUDE_CODE_HOME="$INSTALL_DIR" PYTHONPATH="$INSTALL_DIR" "$PYTHON_BIN" -c "from free_claude_code.config import write_env_values; write_env_values({'NVIDIA_NIM_API': '$USER_API_KEY'})"
+        say "API key validated and saved."
+    else
+        warn "API key validation failed (HTTP $HTTP_CODE). You can set it later in $ENV_FILE or via the admin UI."
+    fi
+else
+    warn "No API key entered. You can set it later in $ENV_FILE or via the admin UI."
+fi
+
 printf '\nNext steps:\n'
-printf '  1. Edit config safely: %s\n' "$ENV_FILE"
-printf '  2. Start server: my-claudecode-server\n'
-printf '  3. Open admin UI: http://127.0.0.1:3456/admin\n'
-printf '  4. New terminal: my-claudecode\n'
+printf '  1. Start server: my-claudecode-server\n'
+printf '  2. Open admin UI (optional): http://127.0.0.1:2424/admin\n'
+printf '  3. New terminal: my-claudecode\n'

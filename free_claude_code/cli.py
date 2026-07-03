@@ -24,7 +24,7 @@ def cmd_server(argv=None) -> int:
     if args.init:
         p = ensure_env()
         print(f"Config ready: {p}")
-        print("Edit it manually or open http://127.0.0.1:3456/admin after starting the server.")
+        print(f"Edit it manually or open http://127.0.0.1:{args.port or 2424}/admin after starting the server.")
         return 0
 
     ensure_env()
@@ -40,7 +40,7 @@ def cmd_server(argv=None) -> int:
 
     values = load_env()
     host = args.host or values.get("HOST", "127.0.0.1")
-    port = args.port or int(values.get("PORT", "3456") or "3456")
+    port = args.port or int(values.get("PORT", "2424") or "2424")
     provider = get_provider(values)
     if provider.needs_key and (not provider.api_key or "your-key" in provider.api_key or provider.api_key == "your-api-key"):
         print(f"Missing NVIDIA_NIM_API. Set it in {env_path()} or run:", file=sys.stderr)

@@ -82,11 +82,22 @@ say "Installed commands:"
 printf '  %s\n' "$BIN_DIR/my-claudecode-server" "$BIN_DIR/my-claudecode"
 say "Config file: $ENV_FILE"
 
-# Prompt for API Key (read from /dev/tty to support piped installation)
-printf '\n\033[1;34m%s\033[0m ' "Please enter your NVIDIA NIM API key:"
-read -r USER_API_KEY < /dev/tty
+# Check if API key already exists
+EXISTING_API_KEY=""
+if [ -f "$ENV_FILE" ]; then
+    EXISTING_API_KEY=$(grep "^NVIDIA_NIM_API=" "$ENV_FILE" | cut -d'=' -f2)
+fi
 
-if [ -n "$USER_API_KEY" ]; then
+if [[ -n "$EXISTING_API_KEY" && "$EXISTING_API_KEY" != "your-api-key" ]]; then
+    say "Existing API key found. Skipping prompt."
+    USER_API_KEY="$EXISTING_API_KEY"
+else
+    # Prompt for API Key (read from /dev/tty to support piped installation)
+    printf '\n\033[1;34m%s\033[0m ' "Please enter your NVIDIA NIM API key:"
+    read -r USER_API_KEY < /dev/tty
+fi
+
+if [[ -n "$USER_API_KEY" && "$USER_API_KEY" != "$EXISTING_API_KEY" ]]; then
     say "Validating API key..."
     # Simple validation check using curl to fetch models
     HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $USER_API_KEY" "https://integrate.api.nvidia.com/v1/models")
@@ -97,7 +108,7 @@ if [ -n "$USER_API_KEY" ]; then
     else
         warn "API key validation failed (HTTP $HTTP_CODE). You can set it later in $ENV_FILE or via the admin UI."
     fi
-else
+elif [[ -z "$USER_API_KEY" ]]; then
     warn "No API key entered. You can set it later in $ENV_FILE or via the admin UI."
 fi
 

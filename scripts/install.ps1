@@ -52,14 +52,31 @@ Write-Host "  $shimCmd1"
 Write-Host "  $shimCmd2"
 Say "Config file: $ExistingEnv"
 
-# Prompt for API Key
-if ($null -eq (Get-Variable Host -ErrorAction SilentlyContinue)) {
-    $UserApiKey = [Console]::ReadLine()
-} else {
-    $UserApiKey = Read-Host "`nPlease enter your NVIDIA NIM API key"
+# Check if API key already exists
+$ExistingApiKey = ""
+if (Test-Path $ExistingEnv) {
+    $content = Get-Content $ExistingEnv
+    foreach ($line in $content) {
+        if ($line -match "^NVIDIA_NIM_API=(.*)") {
+            $ExistingApiKey = $Matches[1].Trim()
+            break
+        }
+    }
 }
 
-if ($UserApiKey) {
+if ($ExistingApiKey -and $ExistingApiKey -ne "your-api-key") {
+    Say "Existing API key found. Skipping prompt."
+    $UserApiKey = $ExistingApiKey
+} else {
+    # Prompt for API Key
+    if ($null -eq (Get-Variable Host -ErrorAction SilentlyContinue)) {
+        $UserApiKey = [Console]::ReadLine()
+    } else {
+        $UserApiKey = Read-Host "`nPlease enter your NVIDIA NIM API key"
+    }
+}
+
+if ($UserApiKey -and $UserApiKey -ne $ExistingApiKey) {
     Say "Validating API key..."
     try {
         $headers = @{ "Authorization" = "Bearer $UserApiKey" }
@@ -71,7 +88,7 @@ if ($UserApiKey) {
     } catch {
         Warn "API key validation failed. You can set it later in $ExistingEnv or via the admin UI."
     }
-} else {
+} elseif (-not $UserApiKey) {
     Warn "No API key entered. You can set it later in $ExistingEnv or via the admin UI."
 }
 

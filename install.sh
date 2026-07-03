@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" 2>/dev/null && pwd || pwd)"
 if [ -f "$SCRIPT_DIR/scripts/install.sh" ] && [ -f "$SCRIPT_DIR/pyproject.toml" ]; then
   exec bash "$SCRIPT_DIR/scripts/install.sh" "$@"
 fi
-REPO_URL="${FREE_CLAUDE_CODE_REPO:-https://github.com/YOUR_NAME/YOUR_REPO.git}"
+REPO_URL="${FREE_CLAUDE_CODE_REPO:-https://github.com/Chintanpatel24/my-free-claudecode.git}"
 BRANCH="${FREE_CLAUDE_CODE_BRANCH:-main}"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT

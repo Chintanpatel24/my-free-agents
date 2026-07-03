@@ -69,10 +69,13 @@ irm https://raw.githubusercontent.com/Chintanpatel24/my-free-claudecode/main/upd
    - Inside the terminal in which you host that `server`, open the `admin panel` and configure a `model` and check a connection.
      <details>
         <summary>Admin panel</summary>
-        <p><image src="assets/admin.png" width="200"></p>
+        <p><image src="assets/admin.png" width="300"></p>
      </details>
    - Select the selected model from the /model command in the claudecode (which is launched with the my-claudcode command (while server it running in background))
-
+     <details>
+        <summary>Admin panel</summary>
+        <p><image src="assets/model.png" width="300"></p>
+     </details>
 ## Configuration
 
 If you need to change your API key later, you can:

@@ -82,9 +82,9 @@ say "Installed commands:"
 printf '  %s\n' "$BIN_DIR/my-claudecode-server" "$BIN_DIR/my-claudecode"
 say "Config file: $ENV_FILE"
 
-# Prompt for API Key
+# Prompt for API Key (read from /dev/tty to support piped installation)
 printf '\n\033[1;34m%s\033[0m ' "Please enter your NVIDIA NIM API key:"
-read -r USER_API_KEY
+read -r USER_API_KEY < /dev/tty
 
 if [ -n "$USER_API_KEY" ]; then
     say "Validating API key..."

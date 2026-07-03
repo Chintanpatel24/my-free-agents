@@ -53,7 +53,11 @@ Write-Host "  $shimCmd2"
 Say "Config file: $ExistingEnv"
 
 # Prompt for API Key
-$UserApiKey = Read-Host "`nPlease enter your NVIDIA NIM API key"
+if ($null -eq (Get-Variable Host -ErrorAction SilentlyContinue)) {
+    $UserApiKey = [Console]::ReadLine()
+} else {
+    $UserApiKey = Read-Host "`nPlease enter your NVIDIA NIM API key"
+}
 
 if ($UserApiKey) {
     Say "Validating API key..."

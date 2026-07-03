@@ -19,7 +19,7 @@ NVIDIA_NIM_API=your-api-key
 """.lstrip()
 
 DEFAULT_NVIDIA_NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"
-DEFAULT_NVIDIA_NIM_MODEL = "z-ai/glm-4-9b-chat"
+DEFAULT_NVIDIA_NIM_MODEL = "z-ai/glm-5.1"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = "2424"
 DEFAULT_MAX_TOKENS = "4096"

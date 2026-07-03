@@ -112,15 +112,13 @@ def extract_model_ids(data: Any) -> list[str]:
                 if key in obj and isinstance(obj[key], str):
                     _add_model_id(ids, obj.get(key))
 
-            # Recurse into other keys, but avoid known display/label keys.
+            # Recurse into other keys, but avoid known display/label/metadata keys.
             for key, value in obj.items():
-                if key in ("model-name", "display_name", "description", "owned_by", "object"):
+                if key in ("model-name", "display_name", "description", "owned_by", "object", "created", "created_at"):
                     continue
-                if isinstance(value, (dict, list, str)):
+                if isinstance(value, (dict, list)):
                     walk(value)
             return
-        if isinstance(obj, str):
-            _add_model_id(ids, obj)
 
     walk(data)
     return ids

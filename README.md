@@ -13,7 +13,7 @@
 - **NVIDIA NIM Support**: Use any model available in the NVIDIA NIM API.
 - **Auto-Config**: Installation script asks for your API key and sets everything up.
 - **Model Selection**: Shows all NVIDIA NIM models directly in Claude Code via `/models`.
-- **Default GLM**: Uses GLM as the default model for a smooth experience.
+- **Default GLM**: Uses GLM 5.1 as the default model for a smooth experience.
 - **Local Proxy**: Runs a lightweight server at `http://127.0.0.1:2424`.
 
 ## Installation
@@ -28,6 +28,26 @@ curl -fsSL https://raw.githubusercontent.com/Chintanpatel24/my-free-claudecode/m
 Run the following command in PowerShell:
 ```powershell
 irm https://raw.githubusercontent.com/Chintanpatel24/my-free-claudecode/main/install.ps1 | iex
+```
+
+### Python (pip)
+Alternatively, you can install it as a Python package:
+```bash
+pip install git+https://github.com/Chintanpatel24/my-free-claudecode.git
+```
+
+## Update
+
+To update to the latest version, run the following command:
+
+### macOS / Linux
+```bash
+curl -fsSL https://raw.githubusercontent.com/Chintanpatel24/my-free-claudecode/main/update.sh | bash
+```
+
+### Windows (PowerShell)
+```powershell
+irm https://raw.githubusercontent.com/Chintanpatel24/my-free-claudecode/main/update.ps1 | iex
 ```
 
 ## How to Use

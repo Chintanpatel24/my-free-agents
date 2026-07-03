@@ -104,15 +104,3 @@ If you need to change your API key later, you can:
   ```bash
   my-server-claudecode --set-key your-nvapi-key
   ```
-
----
-
-## Star History
-
-<a href="https://www.star-history.com/?repos=Chintanpatel24%2Fmy-free-claudecode&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Chintanpatel24/my-free-claudecode&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Chintanpatel24/my-free-claudecode&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Chintanpatel24/my-free-claudecode&type=date&legend=top-left" />
- </picture>
-</a>

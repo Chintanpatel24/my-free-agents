@@ -12,15 +12,14 @@
 <image src="assets/working-fine.png" alt="claudecode-woring-image">
 </div>
 
-## Table of contents
+<!-- ## Table of contents
 
 - [Providers](#Providers)
 - [Installation](#Installation)
 - [Installation using pip](#Installation-using-pip)
 - [Update](#Update)
 - [How to Use](#How-to-Use)
-- [Configuration](#Configuration)
-
+- [Configuration](#Configuration) -->
 
 <a name="Providers"></a>
 ## Providers

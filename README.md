@@ -5,7 +5,6 @@
 </div>
 
 # ***my-free-claudecode***
->contribution only 
 - Use **Claude Code** with **NVIDIA NIM** models for free (using your NVIDIA NIM API key). This project provides a local proxy that translates Claude Code requests into NVIDIA NIM API calls.
 
 ## Features

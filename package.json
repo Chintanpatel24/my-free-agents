@@ -1,0 +1,21 @@
+{
+  "name": "my-free-claudecode",
+  "version": "1.0.0",
+  "description": "Use Claude Code for free with NVIDIA NIM API",
+  "main": "src/server.js",
+  "bin": {
+    "my-claudecode-server": "./src/server.js",
+    "my-claudecode": "./src/cli.js"
+  },
+  "scripts": {
+    "start:server": "node src/server.js",
+    "start:run": "node src/cli.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "chalk": "^4.1.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2"
+  }
+}

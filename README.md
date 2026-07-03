@@ -71,6 +71,7 @@ irm https://raw.githubusercontent.com/Chintanpatel24/my-free-claudecode/main/upd
         <summary>Admin panel</summary>
         <p><image src="assets/admin.png" width="200"></p>
      </details>
+   - Select the selected model from the /model command in the claudecode (which is launched with the my-claudcode command (while server it running in background))
 
 ## Configuration
 

@@ -66,7 +66,11 @@ irm https://raw.githubusercontent.com/Chintanpatel24/my-free-claudecode/main/upd
    my-claudecode
    ```
 3. **Select a Model**:
-   Inside Claude Code, you can use the `/models` command to see and select from 100+ NVIDIA NIM models.
+   - Inside the terminal in which you host that `server`, open the `admin panel` and configure a `model` and check a connection.
+     <details>
+        <summary>Admin panel</summary>
+        <p></p>
+     </details>
 
 ## Configuration
 

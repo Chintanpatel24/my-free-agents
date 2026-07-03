@@ -1,5 +1,7 @@
 <div align=center>
-<img src="asstes/free-claudecode.svg" alt="Logo" width="100" height="100" />   
+   
+<img src="assets/free-claudecode.svg" alt="Logo" width="200"/>   
+
 </div>
 
 # my-free-claudecode

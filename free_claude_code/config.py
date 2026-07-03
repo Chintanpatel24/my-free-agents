@@ -79,14 +79,15 @@ def _api_value(values: Dict[str, str]) -> str:
 def write_env_values(updates: Dict[str, str]) -> None:
     """Write a minimal user-facing .env.
 
-    Only NVIDIA_NIM_API is persisted. Operational settings use safe defaults or
-    process env overrides so the file stays clean and glitch-free.
+    NVIDIA_NIM_API and NVIDIA_NIM_MODEL are persisted.
     """
     p = ensure_env()
     old = parse_env_text(p.read_text(encoding="utf-8"))
     old.update({k: v for k, v in updates.items() if k})
     api = _api_value(old)
-    p.write_text(ENV_HEADER + f"\nNVIDIA_NIM_API={api or 'your-api-key'}\n", encoding="utf-8")
+    model = old.get("NVIDIA_NIM_MODEL", DEFAULT_NVIDIA_NIM_MODEL)
+    content = ENV_HEADER + f"\nNVIDIA_NIM_API={api or 'your-api-key'}\nNVIDIA_NIM_MODEL={model}\n"
+    p.write_text(content, encoding="utf-8")
     try:
         p.chmod(stat.S_IRUSR | stat.S_IWUSR)
     except OSError:

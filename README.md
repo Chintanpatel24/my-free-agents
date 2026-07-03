@@ -69,7 +69,7 @@ irm https://raw.githubusercontent.com/Chintanpatel24/my-free-claudecode/main/upd
    - Inside the terminal in which you host that `server`, open the `admin panel` and configure a `model` and check a connection.
      <details>
         <summary>Admin panel</summary>
-        <p></p>
+        <p><image src="assets/admin.png" width="200"></p>
      </details>
 
 ## Configuration

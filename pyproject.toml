@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "my-free-claudecode"
+version = "1.1.0"
+description = "Installable Python local Anthropic-compatible proxy for Claude Code using NVIDIA NIM."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "My ClaudeCode contributors"}]
+keywords = ["claude-code", "anthropic", "nvidia-nim", "proxy", "python"]
+dependencies = []
+
+[project.scripts]
+my-claudecode-server = "free_claude_code.cli:main_server"
+my-claudecode = "free_claude_code.cli:main_claude"
+
+[tool.setuptools]
+packages = ["free_claude_code"]

@@ -17,7 +17,7 @@
 
 ## Installation
 
-### macOS / Linux
+### Linux/MacOS
 Run the following command in your terminal:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Chintanpatel24/my-free-claudecode/main/install.sh | bash

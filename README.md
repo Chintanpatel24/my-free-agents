@@ -88,7 +88,7 @@ irm https://raw.githubusercontent.com/Chintanpatel24/my-free-claudecode/main/upd
      </details>
    - Select the selected model from the /model command in the claudecode (which is launched with the my-claudcode command (while server it running in background))
      <details>
-        <summary>Admin panel</summary>
+        <summary>/models</summary>
         <p><image src="assets/model.png" width="300"></p>
      </details>
 

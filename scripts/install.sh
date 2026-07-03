@@ -43,9 +43,9 @@ chmod -R go-rwx "$INSTALL_DIR" 2>/dev/null || true
 chmod +x "$INSTALL_DIR/scripts/"*.sh "$INSTALL_DIR/install.sh" "$INSTALL_DIR/uninstall.sh" "$INSTALL_DIR/bin/"* 2>/dev/null || true
 
 # Remove old command name from previous versions to avoid confusion.
-rm -f "$BIN_DIR/my-free-claudecode"
+rm -f "$BIN_DIR/my-free-claudecode" "$BIN_DIR/my-claudecode-server"
 
-cat > "$BIN_DIR/my-claudecode-server" <<EOF
+cat > "$BIN_DIR/my-server-claudecode" <<EOF
 #!/usr/bin/env bash
 export FREE_CLAUDE_CODE_HOME="$INSTALL_DIR"
 export PYTHONPATH="$INSTALL_DIR:\${PYTHONPATH:-}"
@@ -57,7 +57,7 @@ export FREE_CLAUDE_CODE_HOME="$INSTALL_DIR"
 export PYTHONPATH="$INSTALL_DIR:\${PYTHONPATH:-}"
 exec "$PYTHON_BIN" -c 'from free_claude_code.cli import main_claude; main_claude()' "\$@"
 EOF
-chmod 700 "$BIN_DIR/my-claudecode-server" "$BIN_DIR/my-claudecode"
+chmod 700 "$BIN_DIR/my-server-claudecode" "$BIN_DIR/my-claudecode"
 
 FREE_CLAUDE_CODE_HOME="$INSTALL_DIR" PYTHONPATH="$INSTALL_DIR" "$PYTHON_BIN" -c 'from free_claude_code.config import ensure_env, write_env_values; ensure_env(); write_env_values({}); print(ensure_env())' >/tmp/free-claude-code-env-path.txt
 ENV_FILE="$(cat /tmp/free-claude-code-env-path.txt)"
@@ -79,7 +79,7 @@ case ":$PATH:" in
 esac
 
 say "Installed commands:"
-printf '  %s\n' "$BIN_DIR/my-claudecode-server" "$BIN_DIR/my-claudecode"
+printf '  %s\n' "$BIN_DIR/my-server-claudecode" "$BIN_DIR/my-claudecode"
 say "Config file: $ENV_FILE"
 
 # Check if API key already exists
@@ -113,6 +113,6 @@ elif [[ -z "$USER_API_KEY" ]]; then
 fi
 
 printf '\nNext steps:\n'
-printf '  1. Start server: my-claudecode-server\n'
+printf '  1. Start server: my-server-claudecode\n'
 printf '  2. Open admin UI (optional): http://127.0.0.1:2424/admin\n'
 printf '  3. New terminal: my-claudecode\n'

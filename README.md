@@ -54,7 +54,7 @@ irm https://raw.githubusercontent.com/Chintanpatel24/my-free-claudecode/main/upd
 
 1. **Start the Proxy Server**:
    ```bash
-   my-claudecode-server
+   my-server-claudecode
    ```
 2. **Launch Claude Code**:
    In a new terminal window, run:
@@ -71,5 +71,5 @@ If you need to change your API key later, you can:
 - Use the Admin UI at `http://127.0.0.1:2424/admin` while the server is running.
 - Set it via command line:
   ```bash
-  my-claudecode-server --set-key your-nvapi-key
+  my-server-claudecode --set-key your-nvapi-key
   ```

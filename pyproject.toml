@@ -14,7 +14,7 @@ keywords = ["claude-code", "anthropic", "nvidia-nim", "proxy", "python"]
 dependencies = []
 
 [project.scripts]
-my-claudecode-server = "free_claude_code.cli:main_server"
+my-server-claudecode = "free_claude_code.cli:main_server"
 my-claudecode = "free_claude_code.cli:main_claude"
 
 [tool.setuptools]

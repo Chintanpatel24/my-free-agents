@@ -181,7 +181,7 @@ def models_response(provider, values: Dict[str, str]) -> Dict[str, Any]:
     # Last safety filter: never return Anthropic/Claude ids from this proxy.
     ordered = [m for m in ordered if m and not m.startswith("claude-") and "anthropic" not in m.lower()]
 
-    # Ensure the default GLM model is at the top of the list.
+    # Ensure the selected model is at the top of the list.
     if provider.model in ordered:
         ordered.remove(provider.model)
         ordered.insert(0, provider.model)
@@ -407,15 +407,33 @@ class Handler(BaseHTTPRequestHandler):
         if not self._is_loopback():
             return self._send_text(403, "Admin UI is only available from localhost", "text/plain")
         values = load_env()
-        api_value = values.get('NVIDIA_NIM_API') or values.get('NVIDIA_NIM_API_KEY') or ''
+        provider = get_provider(values)
+        api_value = provider.api_key or ""
+        current_model = provider.model
+
+        models = []
+        try:
+            if api_value and api_value != "your-api-key":
+                models, _ = list_provider_models(provider)
+        except Exception:
+            pass
+
+        if not models:
+            models = FALLBACK_NVIDIA_NIM_MODELS
+            if current_model and current_model not in models:
+                models = [current_model] + models
+
+        options = "".join(f'<option value="{html.escape(m)}"{ " selected" if m == current_model else ""}>{html.escape(m)}</option>' for m in models)
+
         html_doc = f"""<!doctype html><html><head><meta charset="utf-8"><title>My ClaudeCode Server Admin</title>
-<style>body{{font-family:system-ui;margin:2rem;max-width:760px}}input{{width:100%;padding:.7rem;margin:.25rem 0 1rem}}section{{border:1px solid #ddd;border-radius:10px;padding:1rem;margin:1rem 0}}button{{padding:.8rem 1.2rem}}code{{background:#eee;padding:.2rem}}</style></head><body>
-<h1>My ClaudeCode Server /admin</h1><p>NVIDIA NIM-only settings. The .env file stores only <code>NVIDIA_NIM_API</code>. Models come from NVIDIA NIM <code>/v1/models</code>.</p>
+<style>body{{font-family:system-ui;margin:2rem;max-width:760px}}input,select{{width:100%;padding:.7rem;margin:.25rem 0 1rem}}section{{border:1px solid #ddd;border-radius:10px;padding:1rem;margin:1rem 0}}button{{padding:.8rem 1.2rem}}code{{background:#eee;padding:.2rem}}</style></head><body>
+<h1>My ClaudeCode Server /admin</h1><p>NVIDIA NIM-only settings. The .env file stores <code>NVIDIA_NIM_API</code> and <code>NVIDIA_NIM_MODEL</code>.</p>
 <form method="post">
-<section><h3>NVIDIA NIM</h3>
-<label>NVIDIA_NIM_API<input name="NVIDIA_NIM_API" value="{html.escape(mask(api_value))}" placeholder="leave masked to keep existing key"></label>
+<section><h3>NVIDIA NIM Settings</h3>
+<label>NVIDIA_NIM_API<input name="NVIDIA_NIM_API" value="{html.escape(mask(api_value))}" placeholder="your-api-key"></label>
+<label>Default Model (NVIDIA_NIM_MODEL)<br><select name="NVIDIA_NIM_MODEL">{options}</select></label>
 </section>
-<button type="submit">Save API key</button></form>
+<button type="submit">Save Settings</button></form>
 <p>Server URL: <code>http://{html.escape(values.get('HOST', DEFAULT_HOST))}:{html.escape(values.get('PORT', DEFAULT_PORT))}</code></p>
 <p>Models endpoint: <code>/v1/models</code> shows NVIDIA NIM model ids only.</p></body></html>"""
         return self._send_text(200, html_doc)
@@ -426,13 +444,13 @@ class Handler(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length", "0") or "0")
         form = parse_qs(self.rfile.read(n).decode("utf-8"), keep_blank_values=True)
         updates: Dict[str, str] = {}
-        allowed = {"NVIDIA_NIM_API"}
+        allowed = {"NVIDIA_NIM_API", "NVIDIA_NIM_MODEL"}
         for k, v in form.items():
             if k not in allowed:
                 continue
             val = v[0].strip()
             # Keep old key if the user submitted the masked value.
-            if k in ("NVIDIA_NIM_API", "NVIDIA_NIM_API_KEY") and "…" in val:
+            if k == "NVIDIA_NIM_API" and "…" in val:
                 continue
             updates[k] = val
         write_env_values(updates)

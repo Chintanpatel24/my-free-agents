@@ -35,6 +35,7 @@ STATS = {
     "total_output_tokens": 0,
     "request_count": 0,
     "recent_requests": collections.deque(maxlen=20),  # Store last 20 requests: {timestamp, model, duration, tokens, status}
+    "history": collections.deque(maxlen=50), # Full prompt/response history
 }
 
 # Used only if NVIDIA's /models endpoint is temporarily unavailable. The real
@@ -309,7 +310,18 @@ class Handler(BaseHTTPRequestHandler):
             # Return stats as JSON for the UI to fetch
             stats_data = dict(STATS)
             stats_data["recent_requests"] = list(STATS["recent_requests"])
+            stats_data["history"] = list(STATS["history"])
             return self._send(200, stats_data)
+        if path == "/admin/version":
+            # Simple check for latest version from GitHub
+            try:
+                # Use a short timeout to not block
+                req = urllib.request.Request("https://api.github.com/repos/Chintanpatel24/my-free-claudecode/releases/latest", headers={"User-Agent": "Claude-NIM-Proxy"})
+                with urllib.request.urlopen(req, timeout=2) as r:
+                    data = json.loads(r.read().decode("utf-8"))
+                    return self._send(200, {"latest": data.get("tag_name", "unknown")})
+            except:
+                return self._send(200, {"latest": "unknown"})
         return self._send(404, {"type": "error", "error": {"type": "not_found", "message": path}})
 
     def do_POST(self):
@@ -322,10 +334,22 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"type": "error", "error": {"type": "bad_request", "message": str(e)}})
         if path == "/v1/messages":
             return self._messages()
+        if path == "/v1/auth/status" or path == "/v1/identify":
+            # Mock identity for Claude Code
+            return self._send(200, {
+                "id": "user_local_proxy",
+                "email": "proxy@localhost",
+                "account": {"id": "acc_local", "name": "Local Proxy User"},
+                "logged_in": True
+            })
         if path == "/admin":
             return self._admin_post()
         if path == "/admin/test":
             return self._admin_test()
+        if path == "/admin/launch":
+            # This is a bit "magical" but we can try to tell the user how to launch
+            # Since we can't easily open a terminal from a web browser safely.
+            return self._send(200, {"ok": True, "command": "my-claudecode"})
         return self._send(404, {"type": "error", "error": {"type": "not_found", "message": path}})
 
     def _messages(self):
@@ -358,6 +382,14 @@ class Handler(BaseHTTPRequestHandler):
                 "input_tokens": in_t,
                 "output_tokens": out_t,
                 "status": 200
+            })
+
+            # Save to history
+            STATS["history"].append({
+                "timestamp": time.time(),
+                "model": upstream_model,
+                "messages": body.get("messages", []),
+                "response": anthropic_resp.get("content", [])
             })
 
             return self._send(200, anthropic_resp)
@@ -488,7 +520,6 @@ class Handler(BaseHTTPRequestHandler):
         provider = get_provider(values)
         api_value = provider.api_key or ""
         current_model = provider.model
-        last_model = values.get("LAST_MODEL", "")
 
         models = []
         try:
@@ -503,10 +534,6 @@ class Handler(BaseHTTPRequestHandler):
                 models = [current_model] + models
 
         options = "".join(f'<option value="{html.escape(m)}"{ " selected" if m == current_model else ""}>{html.escape(m)}</option>' for m in models)
-
-        last_model_html = ""
-        if last_model and last_model != current_model:
-            last_model_html = f"<h3>Last Used Model</h3><div style='margin-bottom:1rem;'><button type='button' style='padding:0.4rem 0.8rem;font-size:0.8rem;' onclick='document.getElementsByName(\"NVIDIA_NIM_MODEL\")[0].value=\"{html.escape(last_model)}\"'>{html.escape(last_model)}</button></div>"
 
         html_doc = f"""<!doctype html><html><head><meta charset="utf-8"><title>My ClaudeCode Server Admin</title>
 <style>
@@ -545,7 +572,11 @@ class Handler(BaseHTTPRequestHandler):
   <h2 style="font-size: 1.2rem; margin-bottom: 1.5rem;">Claude NIM Proxy</h2>
   <a onclick="showPage('config')" id="nav-config" class="active">Configuration</a>
   <a onclick="showPage('stats')" id="nav-stats">Statistics</a>
+  <a onclick="showPage('history')" id="nav-history">History</a>
   <a onclick="showPage('logs')" id="nav-logs">Live Logs</a>
+  <div style="margin-top:auto; padding-top:1rem; border-top:1px solid var(--border);">
+    <button onclick="launchClaude()" style="width:100%; font-size:0.8rem; padding:0.5rem;">Launch Claude</button>
+  </div>
 </div>
 
 <div class="content">
@@ -558,7 +589,6 @@ class Handler(BaseHTTPRequestHandler):
           <h3>NVIDIA NIM Settings</h3>
           <label>NVIDIA_NIM_API<input name="NVIDIA_NIM_API" value="{html.escape(mask(api_value))}" placeholder="your-api-key"></label>
           <label>Default Model (NVIDIA_NIM_MODEL)<br><select id="modelSelect" name="NVIDIA_NIM_MODEL">{options}</select></label>
-          {last_model_html}
           <div style="display:flex;">
             <button type="submit">Save Settings</button>
             <button type="button" class="secondary" onclick="testConnection()">Verify & Fetch Models</button>
@@ -587,8 +617,17 @@ class Handler(BaseHTTPRequestHandler):
       </table>
     </div>
 
+    <div id="history-page" class="page">
+      <h1>Request History</h1>
+      <p>Secure local storage of recent requests.</p>
+      <div id="historyList"></div>
+    </div>
+
     <div id="logs-page" class="page">
       <h1>Live Activity Logs</h1>
+      <div id="updateBanner" style="display:none; background: #fff3cd; color: #856404; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid #ffeeba;">
+        New version available! Latest: <span id="latestVersion"></span>. Update using the script in README.
+      </div>
       <section>
         <div id="logViewer" class="logs">Loading logs...</div>
       </section>
@@ -603,6 +642,7 @@ function showPage(id) {{
   document.getElementById(id + '-page').classList.add('active');
   document.getElementById('nav-' + id).classList.add('active');
   if (id === 'stats') updateStats();
+  if (id === 'history') updateHistory();
 }}
 
 async function testConnection() {{
@@ -661,6 +701,39 @@ async function updateLogs() {{
   }} catch (e) {{}}
 }}
 
+async function updateHistory() {{
+  try {{
+    const resp = await fetch('/admin/stats');
+    const data = await resp.json();
+    const container = document.getElementById('historyList');
+    container.innerHTML = '';
+    data.history.reverse().forEach(h => {{
+      const div = document.createElement('div');
+      div.className = 'stat-card';
+      div.style.display = 'block';
+      div.style.width = '100%';
+      const prompt = h.messages.map(m => `<b>${{m.role}}</b>: ${{m.content}}`).join('<br>');
+      const respText = h.response.map(r => r.text).join('\\n');
+      div.innerHTML = `<div style="font-size:0.8rem; opacity:0.6;">${{new Date(h.timestamp * 1000).toLocaleString()}} - ${{h.model}}</div>
+                       <div style="margin-top:0.5rem; max-height: 100px; overflow-y:auto; border-bottom: 1px solid var(--border); padding-bottom:0.5rem;">${{prompt}}</div>
+                       <div style="margin-top:0.5rem; max-height: 100px; overflow-y:auto; color: var(--btn);">${{respText}}</div>`;
+      container.appendChild(div);
+    }});
+  }} catch (e) {{}}
+}}
+
+async function checkVersion() {{
+  try {{
+    const resp = await fetch('/admin/version');
+    const data = await resp.json();
+    if (data.latest !== 'unknown') {{
+      const banner = document.getElementById('updateBanner');
+      document.getElementById('latestVersion').textContent = data.latest;
+      banner.style.display = 'block';
+    }}
+  }} catch (e) {{}}
+}}
+
 async function updateStats() {{
   try {{
     const resp = await fetch('/admin/stats');
@@ -683,7 +756,14 @@ async function updateStats() {{
 
 setInterval(updateLogs, 2000);
 setInterval(() => {{ if (document.getElementById('stats-page').classList.contains('active')) updateStats(); }}, 5000);
+async function launchClaude() {{
+  const resp = await fetch('/admin/launch', {{ method: 'POST' }});
+  const data = await resp.json();
+  alert('To start Claude with the proxy, run this command in your terminal:\\n\\n' + data.command);
+}}
+
 updateLogs();
+checkVersion();
 </script>
 </body></html>"""
         return self._send_text(200, html_doc)

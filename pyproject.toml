@@ -11,7 +11,9 @@ requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [{name = "My ClaudeCode contributors"}]
 keywords = ["claude-code", "anthropic", "nvidia-nim", "proxy", "python"]
-dependencies = []
+dependencies = [
+    "httpx",
+]
 
 [project.scripts]
 start-claudecode-server = "free_claude_code.cli:main_server"

@@ -6,8 +6,7 @@ import json
 import sys
 import time
 import socket
-import urllib.error
-import urllib.request
+import httpx
 import uuid
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -68,7 +67,9 @@ class ProxyError(Exception):
 
 
 def provider_headers(provider, content_type: bool = True) -> Dict[str, str]:
-    headers: Dict[str, str] = {}
+    headers: Dict[str, str] = {
+        "User-Agent": "NVIDIA-NIM-Proxy/1.1",
+    }
     if content_type:
         headers["Content-Type"] = "application/json"
     if provider.api_key:
@@ -83,13 +84,16 @@ def validate_provider_ready(provider):
         raise ProxyError("NVIDIA_NIM_API is missing or still a placeholder")
 
 
-def call_openai_compatible(provider, body: Dict[str, Any]):
+def call_openai_compatible(provider, body: Dict[str, Any], stream: bool = False):
     validate_provider_ready(provider)
     url = provider.base_url.rstrip("/") + "/chat/completions"
-    req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), headers=provider_headers(provider), method="POST")
-    # Reduced timeout for connection to improve perceived speed on failure.
-    # Total timeout remains 300s for long generations.
-    return urllib.request.urlopen(req, timeout=300)
+    headers = provider_headers(provider)
+
+    client = httpx.Client(timeout=httpx.Timeout(300.0, connect=10.0))
+    if stream:
+        return client.stream("POST", url, json=body, headers=headers)
+    else:
+        return client.post(url, json=body, headers=headers)
 
 
 def _looks_like_model_id(value: str) -> bool:
@@ -143,9 +147,10 @@ def extract_model_ids(data: Any) -> list[str]:
 
 
 def fetch_json(url: str, headers: Optional[Dict[str, str]] = None, timeout: int = 30) -> Any:
-    req = urllib.request.Request(url, headers=headers or {}, method="GET")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    with httpx.Client(timeout=timeout) as client:
+        resp = client.get(url, headers=headers or {})
+        resp.raise_for_status()
+        return resp.json()
 
 
 def list_provider_models(provider) -> tuple[list[str], str]:
@@ -209,6 +214,8 @@ def models_response(provider, values: Dict[str, str]) -> Dict[str, Any]:
         for mid in FALLBACK_NVIDIA_NIM_MODELS:
             if mid not in ordered:
                 ordered.append(mid)
+    # Ensure ordered is a list
+    ordered = list(ordered)
     # Last safety filter: never return Anthropic/Claude ids from this proxy.
     ordered = [m for m in ordered if m and not m.startswith("claude-") and "anthropic" not in m.lower()]
 
@@ -261,6 +268,7 @@ class Handler(BaseHTTPRequestHandler):
         msg = "[%s] %s" % (self.log_date_time_string(), fmt % args)
         if "HEAD" not in msg: # Keep logs cleaner
             sys.stderr.write(msg + "\n")
+            sys.stderr.flush()
         LOG_QUEUE.append(msg)
 
     def _send(self, status: int, data: Any, headers: Optional[Dict[str, str]] = None):
@@ -340,9 +348,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/admin/version":
             try:
-                req = urllib.request.Request("https://api.github.com/repos/Chintanpatel24/my-free-agents/releases/latest", headers={"User-Agent": "Claude-NIM-Proxy"})
-                with urllib.request.urlopen(req, timeout=2) as r:
-                    data = json.loads(r.read().decode("utf-8"))
+                with httpx.Client(timeout=2) as client:
+                    r = client.get("https://api.github.com/repos/Chintanpatel24/my-free-agents/releases/latest", headers={"User-Agent": "Claude-NIM-Proxy"})
+                    data = r.json()
                     return self._send(200, {"latest": data.get("tag_name", "unknown")})
             except:
                 return self._send(200, {"latest": "unknown"})
@@ -371,6 +379,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/admin":
             return self._admin_post()
         if path == "/admin/test":
+            # Start background model fetch if not already in cache
+            import threading
+            threading.Thread(target=self._background_fetch_models, daemon=True).start()
             return self._admin_test()
         if path == "/admin/launch":
             return self._send(200, {"ok": True, "command": "my-claudecode"})
@@ -382,6 +393,7 @@ class Handler(BaseHTTPRequestHandler):
     def _messages(self):
         start_time = time.time()
         try:
+            sys.stderr.write(f"\n[Request] POST /v1/messages\n")
             values = load_env()
             provider = get_provider(values)
             if not provider.model:
@@ -389,24 +401,50 @@ class Handler(BaseHTTPRequestHandler):
 
             body = self._read_json()
             upstream_model = selected_upstream_model(body, provider, values)
+
+            # Log the request details locally
+            msgs = body.get("messages", [])
+            last_msg = msgs[-1].get("content", "") if msgs else ""
+            if isinstance(last_msg, list):
+                last_msg = str(last_msg[0].get("text", "")) if last_msg else ""
+            sys.stderr.write(f"  Model: {upstream_model}\n")
+            sys.stderr.write(f"  Stream: {bool(body.get('stream'))}\n")
+            sys.stderr.write(f"  User: {last_msg[:100]}{'...' if len(str(last_msg)) > 100 else ''}\n")
+            sys.stderr.flush()
+
             max_tokens = int(values.get("DEFAULT_MAX_TOKENS", "4096") or "4096")
             upstream = build_openai_request(body, upstream_model, max_tokens)
-            resp = call_openai_compatible(provider, upstream)
-            if body.get("stream"):
-                return self._pipe_stream(resp, body.get("model") or values.get("ANTHROPIC_MODEL", "my-free-agents"), start_time, upstream_model)
-            data = json.loads(resp.read().decode("utf-8"))
-            anthropic_resp = openai_to_anthropic(data, body.get("model") or values.get("ANTHROPIC_MODEL", "my-free-agents"))
-            return self._send(200, anthropic_resp)
-        except urllib.error.HTTPError as e:
-            detail = e.read().decode("utf-8", "replace")
+
+            is_stream = bool(body.get("stream"))
+            if is_stream:
+                resp_ctx = call_openai_compatible(provider, upstream, stream=True)
+                with resp_ctx as resp:
+                    resp.raise_for_status()
+                    res = self._pipe_stream(resp, body.get("model") or values.get("ANTHROPIC_MODEL", "my-free-agents"), start_time, upstream_model)
+                    sys.stderr.write(f"  [Response] Stream finished in {time.time() - start_time:.2f}s\n")
+                    sys.stderr.flush()
+                    return res
+            else:
+                resp = call_openai_compatible(provider, upstream, stream=False)
+                resp.raise_for_status()
+                data = resp.json()
+                anthropic_resp = openai_to_anthropic(data, body.get("model") or values.get("ANTHROPIC_MODEL", "my-free-agents"))
+                sys.stderr.write(f"  [Response] OK in {time.time() - start_time:.2f}s\n")
+                sys.stderr.flush()
+                return self._send(200, anthropic_resp)
+
+        except httpx.HTTPStatusError as e:
+            detail = e.response.text
             try:
                 err_obj = json.loads(detail)
                 if "detail" in err_obj: detail = err_obj["detail"]
                 elif "error" in err_obj and "message" in err_obj["error"]: detail = err_obj["error"]["message"]
             except: pass
-            msg = f"NVIDIA NIM Error ({e.code}): {detail}"
-            return self._send(e.code, {"type": "error", "error": {"type": "upstream_error", "message": msg[:4000]}})
+            msg = f"NVIDIA NIM Error ({e.response.status_code}): {detail}"
+            return self._send(e.response.status_code, {"type": "error", "error": {"type": "upstream_error", "message": msg[:4000]}})
         except Exception as e:
+            sys.stderr.write(f"  [Error] {str(e)}\n")
+            sys.stderr.flush()
             return self._send(500, {"type": "error", "error": {"type": "proxy_error", "message": str(e)}})
 
     def _sse(self, event: str, data: Dict[str, Any]) -> bool:
@@ -433,63 +471,53 @@ class Handler(BaseHTTPRequestHandler):
         mid = "msg_" + uuid.uuid4().hex
         if not self._sse("message_start", {"type": "message_start", "message": {"id": mid, "type": "message", "role": "assistant", "model": request_model, "content": [], "stop_reason": None, "stop_sequence": None, "usage": {"input_tokens": 0, "output_tokens": 0}}}):
             return
-        buffer = ""
         finish = "end_turn"
         text_started = False
         text_index = 0
         tool_started: Dict[int, bool] = {}
         tool_ids: Dict[int, str] = {}
 
-        for raw in resp:
+        for line in resp.iter_lines():
             try:
-                chunk = raw.decode("utf-8", "replace")
-                if not chunk: continue
-                buffer += chunk
-                if "\n\n" not in buffer: continue
+                if not line or not line.startswith("data:"): continue
+                data = line[5:].strip()
+                if not data or data == "[DONE]": continue
+                obj = json.loads(data)
+                choice = (obj.get("choices") or [{}])[0]
+                delta = choice.get("delta") or {}
 
-                parts = buffer.split("\n\n")
-                buffer = parts.pop() # Last part is potentially incomplete
+                if choice.get("finish_reason"):
+                    finish = "tool_use" if choice.get("finish_reason") == "tool_calls" else "end_turn"
 
-                for part in parts:
-                    line = next((x for x in part.splitlines() if x.startswith("data:")), "")
-                    data = line[5:].strip() if line else ""
-                    if not data or data == "[DONE]": continue
-                    obj = json.loads(data)
-                    choice = (obj.get("choices") or [{}])[0]
-                    delta = choice.get("delta") or {}
+                # Handle Text
+                text = delta.get("content")
+                if text:
+                    if not text_started:
+                        text_started = True
+                        self._sse("content_block_start", {"type": "content_block_start", "index": text_index, "content_block": {"type": "text", "text": ""}})
+                    self._sse("content_block_delta", {"type": "content_block_delta", "index": text_index, "delta": {"type": "text_delta", "text": text}})
 
-                    if choice.get("finish_reason"):
-                        finish = "tool_use" if choice.get("finish_reason") == "tool_calls" else "end_turn"
+                # Handle Tool Calls (Immediate Streaming)
+                for tc in delta.get("tool_calls") or []:
+                    idx = int(tc.get("index", 0))
 
-                    # Handle Text
-                    text = delta.get("content")
-                    if text:
-                        if not text_started:
-                            text_started = True
-                            self._sse("content_block_start", {"type": "content_block_start", "index": text_index, "content_block": {"type": "text", "text": ""}})
-                        self._sse("content_block_delta", {"type": "content_block_delta", "index": text_index, "delta": {"type": "text_delta", "text": text}})
+                    # In Anthropic, each tool call is a separate content block.
+                    # We map OpenAI tool index to Anthropic content block index.
+                    # Usually, index 0 is text (if present).
+                    anthropic_idx = idx + (1 if text_started else 0)
 
-                    # Handle Tool Calls (Immediate Streaming)
-                    for tc in delta.get("tool_calls") or []:
-                        idx = int(tc.get("index", 0))
+                    if idx not in tool_started:
+                        tool_started[idx] = True
+                        tool_id = tc.get("id") or "toolu_" + uuid.uuid4().hex
+                        tool_ids[idx] = tool_id
+                        name = tc.get("function", {}).get("name") or "tool"
+                        self._sse("content_block_start", {"type": "content_block_start", "index": anthropic_idx, "content_block": {"type": "tool_use", "id": tool_id, "name": name, "input": {}}})
 
-                        # In Anthropic, each tool call is a separate content block.
-                        # We map OpenAI tool index to Anthropic content block index.
-                        # Usually, index 0 is text (if present).
-                        anthropic_idx = idx + (1 if text_started else 0)
+                    args = tc.get("function", {}).get("arguments")
+                    if args:
+                        self._sse("content_block_delta", {"type": "content_block_delta", "index": anthropic_idx, "delta": {"type": "input_json_delta", "partial_json": args}})
 
-                        if idx not in tool_started:
-                            tool_started[idx] = True
-                            tool_id = tc.get("id") or "toolu_" + uuid.uuid4().hex
-                            tool_ids[idx] = tool_id
-                            name = tc.get("function", {}).get("name") or "tool"
-                            self._sse("content_block_start", {"type": "content_block_start", "index": anthropic_idx, "content_block": {"type": "tool_use", "id": tool_id, "name": name, "input": {}}})
-
-                        args = tc.get("function", {}).get("arguments")
-                        if args:
-                            self._sse("content_block_delta", {"type": "content_block_delta", "index": anthropic_idx, "delta": {"type": "input_json_delta", "partial_json": args}})
-
-                        finish = "tool_use"
+                    finish = "tool_use"
             except BrokenPipeError: return
             except Exception: continue
 
@@ -546,6 +574,8 @@ class Handler(BaseHTTPRequestHandler):
   button.secondary {{ background: #6c757d; margin-left: 0.5rem; }}
   code {{ background: var(--code-bg); padding: .2rem .4rem; border-radius: 4px; }}
   h1, h2, h3 {{ margin-top: 0; }}
+  .page {{ display: none; }}
+  .page.active {{ display: block; }}
   .logs {{ background: #000; color: #00ff00; padding: 1rem; border-radius: 6px; font-family: monospace; height: 300px; overflow-y: auto; font-size: 0.85rem; border: 1px solid #444; }}
   .status {{ margin-top: 1rem; font-weight: bold; padding: 0.5rem; border-radius: 4px; display: none; }}
   .status.success {{ background: #28a745; color: #fff; display: block; }}
@@ -554,7 +584,6 @@ class Handler(BaseHTTPRequestHandler):
 <div class="sidebar">
   <h2 style="font-size: 1.2rem; margin-bottom: 1.5rem;">Claude NIM Proxy</h2>
   <a onclick="showPage('config')" id="nav-config" class="active">Configuration</a>
-  <a onclick="showPage('logs')" id="nav-logs">Live Logs</a>
   <div style="margin-top:auto; padding-top:1rem; border-top:1px solid var(--border);">
     <button onclick="launchClaude()" style="width:100%; font-size:0.8rem; padding:0.5rem;">Launch Claude</button>
   </div>
@@ -563,6 +592,7 @@ class Handler(BaseHTTPRequestHandler):
   <div class="container">
     <div id="config-page" class="page active">
       <h1>Configuration</h1>
+      <div id="updateBanner" style="display:none; background: #fff3cd; color: #856404; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid #ffeeba;">New version available! Latest: <span id="latestVersion"></span>. Update using the script in README.</div>
       <p>NVIDIA NIM proxy settings.</p>
       <form id="configForm" method="post">
         <section>
@@ -577,14 +607,6 @@ class Handler(BaseHTTPRequestHandler):
         </section>
       </form>
       <section><h3>System Info</h3><p>Server URL: <code>http://{html.escape(values.get('HOST', DEFAULT_HOST))}:{html.escape(values.get('PORT', DEFAULT_PORT))}</code></p></section>
-    </div>
-    <div id="logs-page" class="page">
-      <h1>Live Activity Logs</h1>
-      <div id="updateBanner" style="display:none; background: #fff3cd; color: #856404; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid #ffeeba;">New version available! Latest: <span id="latestVersion"></span>. Update using the script in README.</div>
-      <section>
-        <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;"><h3 style="margin:0;">Logs</h3><button onclick="exportLogs()" class="secondary" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">Export Logs</button></div>
-        <div id="logViewer" class="logs">Loading logs...</div>
-      </section>
     </div>
   </div>
 </div>
@@ -616,17 +638,6 @@ async function testConnection() {{
     }} else {{ status.className = 'status error'; status.textContent = '❌ Error: ' + result.message; }}
   }} catch (e) {{ status.className = 'status error'; status.textContent = '❌ Error: ' + e.message; }}
 }}
-async function updateLogs() {{
-  if (!document.getElementById('logs-page').classList.contains('active')) return;
-  try {{
-    const resp = await fetch('/admin/logs');
-    const data = await resp.json();
-    const viewer = document.getElementById('logViewer');
-    const atBottom = viewer.scrollHeight - viewer.scrollTop <= viewer.clientHeight + 10;
-    viewer.textContent = data.logs.join('\\n');
-    if (atBottom) viewer.scrollTop = viewer.scrollHeight;
-  }} catch (e) {{}}
-}}
 async function checkVersion() {{
   try {{
     const resp = await fetch('/admin/version');
@@ -637,7 +648,6 @@ async function checkVersion() {{
     }}
   }} catch (e) {{}}
 }}
-async function exportLogs() {{ window.location.href = '/admin/logs/export'; }}
 async function launchClaude() {{
   const resp = await fetch('/admin/launch', {{ method: 'POST' }});
   const data = await resp.json(); alert('To start Claude with the proxy, run this command in your terminal:\\n\\n' + data.command);
@@ -654,10 +664,18 @@ async function updateCurrentModel() {{
     }}
   }} catch (e) {{}}
 }}
-setInterval(updateLogs, 2000);
-updateLogs(); checkVersion(); updateCurrentModel();
+checkVersion(); updateCurrentModel();
 </script></body></html>"""
         return self._send_text(200, html_doc)
+
+    def _background_fetch_models(self):
+        try:
+            values = load_env()
+            provider = get_provider(values)
+            if provider.api_key:
+                list_provider_models(provider)
+        except Exception:
+            pass
 
     def _admin_test(self):
         if not self._is_loopback(): return self._send(403, {"ok": False, "message": "Admin UI is only available from localhost"})
@@ -666,19 +684,18 @@ updateLogs(); checkVersion(); updateCurrentModel();
             values = load_env()
             api_key = data.get("NVIDIA_NIM_API", "")
             if "…" in api_key: api_key = get_provider(values).api_key
-            model = data.get("NVIDIA_NIM_MODEL", values.get("NVIDIA_NIM_MODEL", DEFAULT_NVIDIA_NIM_MODEL))
             if not api_key or api_key == "your-api-key": return self._send(200, {"ok": False, "message": "API key is missing"})
             url = f"{DEFAULT_NVIDIA_NIM_BASE_URL}/models"
-            req = urllib.request.Request(url, headers={"Authorization": f"Bearer {api_key}"}, method="GET")
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                models_data = json.loads(resp.read().decode("utf-8"))
+            with httpx.Client(timeout=10) as client:
+                resp = client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+                resp.raise_for_status()
+                models_data = resp.json()
                 available_models = extract_model_ids(models_data)
                 available_models = [m for m in available_models if m and not m.startswith("claude-") and "anthropic" not in m.lower()]
                 return self._send(200, {"ok": True, "models": available_models})
-        except urllib.error.HTTPError as e:
-            msg = str(e)
+        except httpx.HTTPStatusError as e:
+            msg = e.response.text
             try:
-                msg = e.read().decode("utf-8")
                 err_data = json.loads(msg)
                 if "detail" in err_data: msg = err_data["detail"]
             except: pass

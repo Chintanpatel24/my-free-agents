@@ -312,7 +312,7 @@ class Handler(BaseHTTPRequestHandler):
             stats_data = dict(STATS)
             stats_data["recent_requests"] = list(STATS["recent_requests"])
             stats_data["history"] = list(STATS["history"])
-            stats_data["latency_data"] = list(STATS["latency_data"][-100:])
+            stats_data["latency_data"] = list(STATS["latency_data"])
             return self._send(200, stats_data)
         if path == "/admin/version":
             # Simple check for latest version from GitHub

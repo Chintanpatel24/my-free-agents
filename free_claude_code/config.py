@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional
 
-APP_NAME = "My ClaudeCode NVIDIA NIM Proxy"
-ENV_HEADER = """# Managed by My ClaudeCode Server /admin.
+APP_NAME = "My Free Agents"
+ENV_HEADER = """# Managed by My Free Agents /admin.
 # Paste your NVIDIA NIM key here. Nothing else is required.
 """
 
@@ -29,6 +29,8 @@ PROVIDERS = ["NVIDIA_NIM"]
 
 
 def app_home() -> Path:
+    if os.environ.get("MY_FREE_AGENTS_HOME"):
+        return Path(os.environ["MY_FREE_AGENTS_HOME"]).expanduser().resolve()
     if os.environ.get("FREE_CLAUDE_CODE_HOME"):
         return Path(os.environ["FREE_CLAUDE_CODE_HOME"]).expanduser().resolve()
     return Path(__file__).resolve().parents[1]

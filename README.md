@@ -4,7 +4,7 @@
 
 </div>
 
-# ***my-free-claudecode***
+# ***my-free-agents***
 - Use **Claude Code** with **NVIDIA NIM** models for free (using your NVIDIA NIM API key). This project provides a local proxy that translates Claude Code requests into NVIDIA NIM API calls.
 >[!IMPORTANT]
 >- Version `1.0.1` contains an error `501`, so use version `1.0.0` or install it from the dev branch. (which is in working condation)(by changinf the url with the new repo name)<br>
@@ -36,20 +36,20 @@
 ### Linux/MacOS
 Run the following command in your terminal:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Chintanpatel24/my-free-claudecode/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Chintanpatel24/my-free-agents/main/install.sh | bash
 ```
 
 ### Windows (PowerShell)
 Run the following command in PowerShell:
 ```powershell
-irm https://raw.githubusercontent.com/Chintanpatel24/my-free-claudecode/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Chintanpatel24/my-free-agents/main/install.ps1 | iex
 ```
 
 <a name="Installation-using-pip"></a>
 ### Python (pip)
 Alternatively, you can install it as a Python package:
 ```bash
-pip install git+https://github.com/Chintanpatel24/my-free-claudecode.git
+pip install git+https://github.com/Chintanpatel24/my-free-agents.git
 ```
 
 ---
@@ -61,12 +61,12 @@ To update to the latest version, run the following command:
 
 ### macOS / Linux
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Chintanpatel24/my-free-claudecode/main/update.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Chintanpatel24/my-free-agents/main/update.sh | bash
 ```
 
 ### Windows (PowerShell)
 ```powershell
-irm https://raw.githubusercontent.com/Chintanpatel24/my-free-claudecode/main/update.ps1 | iex
+irm https://raw.githubusercontent.com/Chintanpatel24/my-free-agents/main/update.ps1 | iex
 ```
 
 ---
@@ -76,7 +76,7 @@ irm https://raw.githubusercontent.com/Chintanpatel24/my-free-claudecode/main/upd
 
 1. **Start the Proxy Server**:
    ```bash
-   my-server-claudecode
+   start-claudecode-server
    ```
 2. **Launch Claude Code**:
    In a new terminal window, run:
@@ -101,9 +101,9 @@ irm https://raw.githubusercontent.com/Chintanpatel24/my-free-claudecode/main/upd
 ## Configuration
 
 If you need to change your API key later, you can:
-- Edit the `.env` file located at `~/.free-claude-code/app/.env` (Linux/Mac) or `%USERPROFILE%\.free-claude-code\app\.env` (Windows).
+- Edit the `.env` file located at `~/.my-free-agents/claudecode/.env` (Linux/Mac) or `%USERPROFILE%\.my-free-agents\claudecode\.env` (Windows).
 - Use the Admin UI at `http://127.0.0.1:2424/admin` while the server is running.
 - Set it via command line:
   ```bash
-  my-server-claudecode --set-key your-nvapi-key
+  start-claudecode-server --set-key your-nvapi-key
   ```

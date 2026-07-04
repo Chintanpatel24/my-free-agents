@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_NAME="My ClaudeCode NVIDIA NIM Proxy"
+APP_NAME="My Free Agents"
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-INSTALL_DIR="${FREE_CLAUDE_CODE_INSTALL_DIR:-$HOME/.free-claude-code/app}"
-BIN_DIR="${FREE_CLAUDE_CODE_BIN_DIR:-$HOME/.local/bin}"
+OLD_INSTALL_DIR="$HOME/.free-claude-code/app"
+INSTALL_DIR="${MY_FREE_AGENTS_INSTALL_DIR:-$HOME/.my-free-agents/claudecode}"
+BIN_DIR="${MY_FREE_AGENTS_BIN_DIR:-$HOME/.local/bin}"
 PYTHON_BIN="${PYTHON:-python3}"
 
 say(){ printf '\033[1;32m%s\033[0m\n' "$*"; }
@@ -17,6 +18,14 @@ import sys
 if sys.version_info < (3, 10):
     raise SystemExit('Python 3.10+ is required. Found ' + sys.version.split()[0])
 PY
+
+# Migration logic
+if [ -d "$OLD_INSTALL_DIR" ] && [ ! -d "$INSTALL_DIR" ]; then
+    say "Migrating existing installation from $OLD_INSTALL_DIR to $INSTALL_DIR..."
+    mkdir -p "$(dirname "$INSTALL_DIR")"
+    cp -R "$OLD_INSTALL_DIR" "$INSTALL_DIR"
+    warn "Migration complete. You may want to remove $OLD_INSTALL_DIR manually later."
+fi
 
 say "Installing $APP_NAME safely for the current user..."
 mkdir -p "$INSTALL_DIR" "$BIN_DIR"
@@ -42,26 +51,26 @@ fi
 chmod -R go-rwx "$INSTALL_DIR" 2>/dev/null || true
 chmod +x "$INSTALL_DIR/scripts/"*.sh "$INSTALL_DIR/install.sh" "$INSTALL_DIR/uninstall.sh" "$INSTALL_DIR/bin/"* 2>/dev/null || true
 
-# Remove old command name from previous versions to avoid confusion.
-rm -f "$BIN_DIR/my-free-claudecode" "$BIN_DIR/my-claudecode-server"
+# Remove old command names to avoid confusion.
+rm -f "$BIN_DIR/my-free-claudecode" "$BIN_DIR/my-claudecode-server" "$BIN_DIR/my-server-claudecode"
 
-cat > "$BIN_DIR/my-server-claudecode" <<EOF
+cat > "$BIN_DIR/start-claudecode-server" <<EOF
 #!/usr/bin/env bash
-export FREE_CLAUDE_CODE_HOME="$INSTALL_DIR"
+export MY_FREE_AGENTS_HOME="$INSTALL_DIR"
 export PYTHONPATH="$INSTALL_DIR:\${PYTHONPATH:-}"
 exec "$PYTHON_BIN" -c 'from free_claude_code.cli import main_server; main_server()' "\$@"
 EOF
 cat > "$BIN_DIR/my-claudecode" <<EOF
 #!/usr/bin/env bash
-export FREE_CLAUDE_CODE_HOME="$INSTALL_DIR"
+export MY_FREE_AGENTS_HOME="$INSTALL_DIR"
 export PYTHONPATH="$INSTALL_DIR:\${PYTHONPATH:-}"
 exec "$PYTHON_BIN" -c 'from free_claude_code.cli import main_claude; main_claude()' "\$@"
 EOF
-chmod 700 "$BIN_DIR/my-server-claudecode" "$BIN_DIR/my-claudecode"
+chmod 700 "$BIN_DIR/start-claudecode-server" "$BIN_DIR/my-claudecode"
 
-FREE_CLAUDE_CODE_HOME="$INSTALL_DIR" PYTHONPATH="$INSTALL_DIR" "$PYTHON_BIN" -c 'from free_claude_code.config import ensure_env, write_env_values; ensure_env(); write_env_values({}); print(ensure_env())' >/tmp/free-claude-code-env-path.txt
-ENV_FILE="$(cat /tmp/free-claude-code-env-path.txt)"
-rm -f /tmp/free-claude-code-env-path.txt
+MY_FREE_AGENTS_HOME="$INSTALL_DIR" PYTHONPATH="$INSTALL_DIR" "$PYTHON_BIN" -c 'from free_claude_code.config import ensure_env, write_env_values; ensure_env(); write_env_values({}); print(ensure_env())' >/tmp/my-free-agents-env-path.txt
+ENV_FILE="$(cat /tmp/my-free-agents-env-path.txt)"
+rm -f /tmp/my-free-agents-env-path.txt
 chmod 600 "$ENV_FILE" 2>/dev/null || true
 
 case ":$PATH:" in
@@ -72,14 +81,14 @@ case ":$PATH:" in
     [ "$SHELL_NAME" = "zsh" ] && PROFILE="$HOME/.zshrc"
     [ "$SHELL_NAME" = "bash" ] && PROFILE="$HOME/.bashrc"
     if ! grep -q "export PATH=\"$BIN_DIR:" "$PROFILE" 2>/dev/null; then
-      printf '\n# My ClaudeCode NVIDIA NIM Proxy\nexport PATH="%s:$PATH"\n' "$BIN_DIR" >> "$PROFILE"
+      printf '\n# My Free Agents\nexport PATH="%s:$PATH"\n' "$BIN_DIR" >> "$PROFILE"
     fi
     warn "$BIN_DIR was added to $PROFILE. Restart your terminal or run: export PATH=\"$BIN_DIR:\$PATH\""
     ;;
 esac
 
 say "Installed commands:"
-printf '  %s\n' "$BIN_DIR/my-server-claudecode" "$BIN_DIR/my-claudecode"
+printf '  %s\n' "$BIN_DIR/start-claudecode-server" "$BIN_DIR/my-claudecode"
 say "Config file: $ENV_FILE"
 
 # Check if API key already exists
@@ -107,7 +116,7 @@ if [[ -n "$USER_API_KEY" && "$USER_API_KEY" != "$EXISTING_API_KEY" ]]; then
     HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $USER_API_KEY" "https://integrate.api.nvidia.com/v1/models")
 
     if [ "$HTTP_CODE" = "200" ]; then
-        FREE_CLAUDE_CODE_HOME="$INSTALL_DIR" PYTHONPATH="$INSTALL_DIR" "$PYTHON_BIN" -c "from free_claude_code.config import write_env_values; write_env_values({'NVIDIA_NIM_API': '$USER_API_KEY'})"
+        MY_FREE_AGENTS_HOME="$INSTALL_DIR" PYTHONPATH="$INSTALL_DIR" "$PYTHON_BIN" -c "from free_claude_code.config import write_env_values; write_env_values({'NVIDIA_NIM_API': '$USER_API_KEY'})"
         say "API key validated and saved."
     else
         warn "API key validation failed (HTTP $HTTP_CODE). You can set it later in $ENV_FILE or via the admin UI."
@@ -117,6 +126,6 @@ elif [[ -z "$USER_API_KEY" ]]; then
 fi
 
 printf '\nNext steps:\n'
-printf '  1. Start server: my-server-claudecode\n'
+printf '  1. Start server: start-claudecode-server\n'
 printf '  2. Open admin UI (optional): http://127.0.0.1:2424/admin\n'
 printf '  3. New terminal: my-claudecode\n'

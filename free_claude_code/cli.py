@@ -12,7 +12,7 @@ from .server import run_server
 
 
 def cmd_server(argv=None) -> int:
-    parser = argparse.ArgumentParser(prog="my-server-claudecode", description="Start/manage the NVIDIA NIM local proxy for Claude Code.")
+    parser = argparse.ArgumentParser(prog="start-claudecode-server", description="Start/manage the NVIDIA NIM local proxy for Claude Code.")
     parser.add_argument("--init", action="store_true", help="create .env if missing")
     parser.add_argument("--doctor", action="store_true", help="check installation and config")
     parser.add_argument("--set-key", help="save NVIDIA_NIM_API in .env")
@@ -44,7 +44,7 @@ def cmd_server(argv=None) -> int:
     provider = get_provider(values)
     if provider.needs_key and (not provider.api_key or "your-key" in provider.api_key or provider.api_key == "your-api-key"):
         print(f"Missing NVIDIA_NIM_API. Set it in {env_path()} or run:", file=sys.stderr)
-        print("  my-server-claudecode --set-key YOUR_NVIDIA_NIM_KEY", file=sys.stderr)
+        print("  start-claudecode-server --set-key YOUR_NVIDIA_NIM_KEY", file=sys.stderr)
         return 2
     if not provider.model:
         # If model is missing, it will use DEFAULT_NVIDIA_NIM_MODEL from config.py
@@ -86,7 +86,7 @@ def doctor() -> int:
     claude = values.get("CLAUDE_BINARY", "claude")
     found = shutil.which(claude)
     print(f"Claude Code binary '{claude}': {found or 'NOT FOUND'}")
-    print("\nIf config is missing: my-server-claudecode --init")
+    print("\nIf config is missing: start-claudecode-server --init")
     return 0
 
 

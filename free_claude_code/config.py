@@ -14,9 +14,11 @@ ENV_HEADER = """# Managed by My ClaudeCode Server /admin.
 # User asked for a clean env with only the NVIDIA NIM API value.
 # The app still accepts NVIDIA_NIM_API_KEY for backwards compatibility, but new
 # installs only create NVIDIA_NIM_API.
-DEFAULT_ENV = ENV_HEADER + """
-NVIDIA_NIM_API=your-api-key
-""".lstrip()
+DEFAULT_ENV = """# NVIDIA NIM API Key
+NVIDIA_NIM_API=
+# NVIDIA NIM Model
+NVIDIA_NIM_MODEL=
+"""
 
 DEFAULT_NVIDIA_NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"
 DEFAULT_NVIDIA_NIM_MODEL = "z-ai/glm-5.1"
@@ -87,7 +89,7 @@ def write_env_values(updates: Dict[str, str]) -> None:
     api = _api_value(old)
     model = old.get("NVIDIA_NIM_MODEL", DEFAULT_NVIDIA_NIM_MODEL)
     last = old.get("LAST_MODEL", "")
-    content = ENV_HEADER + f"\nNVIDIA_NIM_API={api or 'your-api-key'}\nNVIDIA_NIM_MODEL={model}\nLAST_MODEL={last}\n"
+    content = f"# NVIDIA NIM API Key\nNVIDIA_NIM_API={api}\n# NVIDIA NIM Model\nNVIDIA_NIM_MODEL={model}\n# Last Used Model\nLAST_MODEL={last}\n"
     p.write_text(content, encoding="utf-8")
     try:
         p.chmod(stat.S_IRUSR | stat.S_IWUSR)

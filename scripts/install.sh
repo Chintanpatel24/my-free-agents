@@ -88,7 +88,11 @@ if [ -f "$ENV_FILE" ]; then
     EXISTING_API_KEY=$(grep "^NVIDIA_NIM_API=" "$ENV_FILE" | cut -d'=' -f2)
 fi
 
-if [[ -n "$EXISTING_API_KEY" && "$EXISTING_API_KEY" != "your-api-key" ]]; then
+if [[ -n "$EXISTING_API_KEY" && "$EXISTING_API_KEY" != "your-api-key" && -z "${EXISTING_API_KEY// }" ]]; then
+    # Prompt for API Key (read from /dev/tty to support piped installation)
+    printf '\n\033[1;34m%s\033[0m ' "Please enter your NVIDIA NIM API key:"
+    read -r USER_API_KEY < /dev/tty
+elif [[ -n "$EXISTING_API_KEY" && "$EXISTING_API_KEY" != "your-api-key" ]]; then
     say "Existing API key found. Skipping prompt."
     USER_API_KEY="$EXISTING_API_KEY"
 else

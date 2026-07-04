@@ -29,6 +29,14 @@ SENSITIVE_KEYS = ("API", "API_KEY")
 
 LOG_QUEUE: collections.deque[str] = collections.deque(maxlen=50)
 
+# Statistics tracking
+STATS = {
+    "total_input_tokens": 0,
+    "total_output_tokens": 0,
+    "request_count": 0,
+    "recent_requests": collections.deque(maxlen=20),  # Store last 20 requests: {timestamp, model, duration, tokens, status}
+}
+
 # Used only if NVIDIA's /models endpoint is temporarily unavailable. The real
 # /models response is preferred whenever the user's key can access it.
 NVIDIA_FEATURED_MODELS_URL = "https://assets.ngc.nvidia.com/products/api-catalog/featured-models.json"
@@ -297,6 +305,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._admin_get()
         if path == "/admin/logs":
             return self._send(200, {"logs": list(LOG_QUEUE)})
+        if path == "/admin/stats":
+            # Return stats as JSON for the UI to fetch
+            stats_data = dict(STATS)
+            stats_data["recent_requests"] = list(STATS["recent_requests"])
+            return self._send(200, stats_data)
         return self._send(404, {"type": "error", "error": {"type": "not_found", "message": path}})
 
     def do_POST(self):
@@ -316,6 +329,8 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {"type": "error", "error": {"type": "not_found", "message": path}})
 
     def _messages(self):
+        start_time = time.time()
+        upstream_model = "unknown"
         try:
             values = load_env()
             provider = get_provider(values)
@@ -325,9 +340,27 @@ class Handler(BaseHTTPRequestHandler):
             upstream = build_openai_request(body, upstream_model, max_tokens)
             resp = call_openai_compatible(provider, upstream)
             if body.get("stream"):
-                return self._pipe_stream(resp, body.get("model") or values.get("ANTHROPIC_MODEL", "free-claude-code"))
+                return self._pipe_stream(resp, body.get("model") or values.get("ANTHROPIC_MODEL", "free-claude-code"), start_time, upstream_model)
             data = json.loads(resp.read().decode("utf-8"))
-            return self._send(200, openai_to_anthropic(data, body.get("model") or values.get("ANTHROPIC_MODEL", "free-claude-code")))
+            anthropic_resp = openai_to_anthropic(data, body.get("model") or values.get("ANTHROPIC_MODEL", "free-claude-code"))
+
+            # Update stats
+            usage = data.get("usage") or {}
+            in_t = usage.get("prompt_tokens", 0)
+            out_t = usage.get("completion_tokens", 0)
+            STATS["total_input_tokens"] += in_t
+            STATS["total_output_tokens"] += out_t
+            STATS["request_count"] += 1
+            STATS["recent_requests"].append({
+                "timestamp": time.time(),
+                "model": upstream_model,
+                "duration": time.time() - start_time,
+                "input_tokens": in_t,
+                "output_tokens": out_t,
+                "status": 200
+            })
+
+            return self._send(200, anthropic_resp)
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "replace")
             try:
@@ -358,7 +391,7 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
             return False
 
-    def _pipe_stream(self, resp, request_model: str):
+    def _pipe_stream(self, resp, request_model: str, start_time: float, upstream_model: str):
         try:
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -426,6 +459,20 @@ class Handler(BaseHTTPRequestHandler):
         if not text_started and not tool_calls:
             self._sse("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}})
             self._sse("content_block_stop", {"type": "content_block_stop", "index": 0})
+        # Update stats for streaming
+        STATS["request_count"] += 1
+        duration = time.time() - start_time
+        # We don't have easy token counts for stream without more complex parsing
+        # but we can estimate or just log the duration.
+        STATS["recent_requests"].append({
+            "timestamp": time.time(),
+            "model": upstream_model,
+            "duration": duration,
+            "input_tokens": 0, # Estimated could go here
+            "output_tokens": 0,
+            "status": 200
+        })
+
         self._sse("message_delta", {"type": "message_delta", "delta": {"stop_reason": finish, "stop_sequence": None}, "usage": {"output_tokens": 0}})
         self._sse("message_stop", {"type": "message_stop"})
         self.close_connection = True
@@ -463,11 +510,17 @@ class Handler(BaseHTTPRequestHandler):
 
         html_doc = f"""<!doctype html><html><head><meta charset="utf-8"><title>My ClaudeCode Server Admin</title>
 <style>
-  :root {{ --bg: #fff; --text: #333; --border: #ddd; --section: #f9f9f9; --btn: #007bff; --btn-text: #fff; --code-bg: #eee; }}
+  :root {{ --bg: #fff; --text: #333; --border: #ddd; --section: #f9f9f9; --btn: #007bff; --btn-text: #fff; --code-bg: #eee; --sidebar-bg: #f1f1f1; }}
   @media (prefers-color-scheme: dark) {{
-    :root {{ --bg: #1e1e1e; --text: #e0e0e0; --border: #444; --section: #2d2d2d; --btn: #375a7f; --btn-text: #fff; --code-bg: #333; }}
+    :root {{ --bg: #1e1e1e; --text: #e0e0e0; --border: #444; --section: #2d2d2d; --btn: #375a7f; --btn-text: #fff; --code-bg: #333; --sidebar-bg: #252525; }}
   }}
-  body {{ font-family: system-ui, -apple-system, sans-serif; margin: 2rem auto; max-width: 800px; line-height: 1.5; background: var(--bg); color: var(--text); padding: 0 1rem; }}
+  body {{ font-family: system-ui, -apple-system, sans-serif; margin: 0; display: flex; height: 100vh; background: var(--bg); color: var(--text); }}
+  .sidebar {{ width: 200px; background: var(--sidebar-bg); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 1rem; }}
+  .sidebar a {{ color: var(--text); text-decoration: none; padding: .75rem 1rem; border-radius: 6px; margin-bottom: .5rem; font-weight: 600; cursor: pointer; }}
+  .sidebar a:hover {{ background: var(--section); }}
+  .sidebar a.active {{ background: var(--btn); color: var(--btn-text); }}
+  .content {{ flex: 1; padding: 2rem; overflow-y: auto; }}
+  .container {{ max-width: 800px; margin: 0 auto; }}
   input, select {{ width: 100%; padding: .7rem; margin: .25rem 0 1.5rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); box-sizing: border-box; }}
   section {{ border: 1px solid var(--border); border-radius: 10px; padding: 1.5rem; margin: 1.5rem 0; background: var(--section); }}
   button {{ padding: .8rem 1.2rem; border: none; border-radius: 6px; background: var(--btn); color: var(--btn-text); cursor: pointer; font-weight: 600; }}
@@ -475,44 +528,87 @@ class Handler(BaseHTTPRequestHandler):
   button.secondary {{ background: #6c757d; margin-left: 0.5rem; }}
   code {{ background: var(--code-bg); padding: .2rem .4rem; border-radius: 4px; }}
   h1, h2, h3 {{ margin-top: 0; }}
-  .logs {{ background: #000; color: #00ff00; padding: 1rem; border-radius: 6px; font-family: monospace; height: 200px; overflow-y: auto; font-size: 0.85rem; border: 1px solid #444; }}
+  .logs {{ background: #000; color: #00ff00; padding: 1rem; border-radius: 6px; font-family: monospace; height: 300px; overflow-y: auto; font-size: 0.85rem; border: 1px solid #444; }}
   .status {{ margin-top: 1rem; font-weight: bold; padding: 0.5rem; border-radius: 4px; display: none; }}
   .status.success {{ background: #28a745; color: #fff; display: block; }}
   .status.error {{ background: #dc3545; color: #fff; display: block; }}
+  .stat-card {{ display: inline-block; background: var(--section); padding: 1rem; border: 1px solid var(--border); border-radius: 8px; margin-right: 1rem; margin-bottom: 1rem; min-width: 150px; }}
+  .stat-value {{ font-size: 1.5rem; font-weight: bold; color: var(--btn); }}
+  .stat-label {{ font-size: 0.85rem; opacity: 0.8; }}
+  table {{ width: 100%; border-collapse: collapse; margin-top: 1rem; }}
+  th, td {{ padding: .75rem; text-align: left; border-bottom: 1px solid var(--border); font-size: 0.9rem; }}
+  .page {{ display: none; }}
+  .page.active {{ display: block; }}
 </style></head><body>
-<h1>My ClaudeCode Admin Panel</h1>
-<p>NVIDIA NIM proxy configuration and monitoring.</p>
 
-<form id="configForm" method="post">
-<section>
-  <h3>NVIDIA NIM Settings</h3>
-  <label>NVIDIA_NIM_API<input name="NVIDIA_NIM_API" value="{html.escape(mask(api_value))}" placeholder="your-api-key"></label>
-  <label>Default Model (NVIDIA_NIM_MODEL)<br><select name="NVIDIA_NIM_MODEL">{options}</select></label>
-  {last_model_html}
-  <div style="display:flex;">
-    <button type="submit">Save Settings</button>
-    <button type="button" class="secondary" onclick="testConnection()">Test Connection</button>
+<div class="sidebar">
+  <h2 style="font-size: 1.2rem; margin-bottom: 1.5rem;">Claude NIM Proxy</h2>
+  <a onclick="showPage('config')" id="nav-config" class="active">Configuration</a>
+  <a onclick="showPage('stats')" id="nav-stats">Statistics</a>
+  <a onclick="showPage('logs')" id="nav-logs">Live Logs</a>
+</div>
+
+<div class="content">
+  <div class="container">
+    <div id="config-page" class="page active">
+      <h1>Configuration</h1>
+      <p>NVIDIA NIM proxy settings.</p>
+      <form id="configForm" method="post">
+        <section>
+          <h3>NVIDIA NIM Settings</h3>
+          <label>NVIDIA_NIM_API<input name="NVIDIA_NIM_API" value="{html.escape(mask(api_value))}" placeholder="your-api-key"></label>
+          <label>Default Model (NVIDIA_NIM_MODEL)<br><select id="modelSelect" name="NVIDIA_NIM_MODEL">{options}</select></label>
+          {last_model_html}
+          <div style="display:flex;">
+            <button type="submit">Save Settings</button>
+            <button type="button" class="secondary" onclick="testConnection()">Verify & Fetch Models</button>
+          </div>
+          <div id="testStatus" class="status"></div>
+        </section>
+      </form>
+      <section>
+        <h3>System Info</h3>
+        <p>Server URL: <code>http://{html.escape(values.get('HOST', DEFAULT_HOST))}:{html.escape(values.get('PORT', DEFAULT_PORT))}</code></p>
+      </section>
+    </div>
+
+    <div id="stats-page" class="page">
+      <h1>Statistics</h1>
+      <p>Usage and performance metrics.</p>
+      <div id="statsContainer">
+        <div class="stat-card"><div class="stat-value" id="stat-requests">0</div><div class="stat-label">Total Requests</div></div>
+        <div class="stat-card"><div class="stat-value" id="stat-input">0</div><div class="stat-label">Input Tokens</div></div>
+        <div class="stat-card"><div class="stat-value" id="stat-output">0</div><div class="stat-label">Output Tokens</div></div>
+      </div>
+      <h3>Recent Requests</h3>
+      <table id="requestsTable">
+        <thead><tr><th>Time</th><th>Model</th><th>Duration</th><th>Tokens</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div id="logs-page" class="page">
+      <h1>Live Activity Logs</h1>
+      <section>
+        <div id="logViewer" class="logs">Loading logs...</div>
+      </section>
+    </div>
   </div>
-  <div id="testStatus" class="status"></div>
-</section>
-</form>
-
-<section>
-  <h3>Live Activity Logs</h3>
-  <div id="logViewer" class="logs">Loading logs...</div>
-</section>
-
-<section>
-  <h3>System Info</h3>
-  <p>Server URL: <code>http://{html.escape(values.get('HOST', DEFAULT_HOST))}:{html.escape(values.get('PORT', DEFAULT_PORT))}</code></p>
-  <p>Models endpoint: <code>/v1/models</code> (shows NVIDIA NIM model ids only)</p>
-</section>
+</div>
 
 <script>
+function showPage(id) {{
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.sidebar a').forEach(a => a.classList.remove('active'));
+  document.getElementById(id + '-page').classList.add('active');
+  document.getElementById('nav-' + id).classList.add('active');
+  if (id === 'stats') updateStats();
+}}
+
 async function testConnection() {{
   const status = document.getElementById('testStatus');
   status.className = 'status';
-  status.textContent = 'Testing connection...';
+  status.textContent = 'Verifying and fetching models...';
   status.style.display = 'block';
 
   const form = document.getElementById('configForm');
@@ -527,13 +623,26 @@ async function testConnection() {{
       body: JSON.stringify(data)
     }});
     const result = await resp.json();
-    if (result.ok) {{
-      status.className = 'status success';
-      status.textContent = '✅ Success: Connection verified and model is accessible.';
-    }} else {{
-      status.className = 'status error';
-      status.textContent = '❌ Error: ' + result.message;
-    }}
+        if (result.ok) {{
+          status.className = 'status success';
+          status.textContent = '✅ Success: Connection verified.';
+          if (result.models && result.models.length > 0) {{
+            const select = document.getElementById('modelSelect');
+            const current = select.value;
+            select.innerHTML = '';
+            result.models.forEach(m => {{
+              const opt = document.createElement('option');
+              opt.value = m;
+              opt.textContent = m;
+              if (m === current) opt.selected = true;
+              select.appendChild(opt);
+            }});
+            status.textContent += ' ' + result.models.length + ' models updated in list.';
+          }}
+        }} else {{
+          status.className = 'status error';
+          status.textContent = '❌ Error: ' + result.message;
+        }}
   }} catch (e) {{
     status.className = 'status error';
     status.textContent = '❌ Error: ' + e.message;
@@ -541,6 +650,7 @@ async function testConnection() {{
 }}
 
 async function updateLogs() {{
+  if (!document.getElementById('logs-page').classList.contains('active')) return;
   try {{
     const resp = await fetch('/admin/logs');
     const data = await resp.json();
@@ -551,7 +661,28 @@ async function updateLogs() {{
   }} catch (e) {{}}
 }}
 
+async function updateStats() {{
+  try {{
+    const resp = await fetch('/admin/stats');
+    const data = await resp.json();
+    document.getElementById('stat-requests').textContent = data.request_count;
+    document.getElementById('stat-input').textContent = data.total_input_tokens;
+    document.getElementById('stat-output').textContent = data.total_output_tokens;
+
+    const tbody = document.querySelector('#requestsTable tbody');
+    tbody.innerHTML = '';
+    data.recent_requests.reverse().forEach(r => {{
+      const row = tbody.insertRow();
+      row.insertCell().textContent = new Date(r.timestamp * 1000).toLocaleTimeString();
+      row.insertCell().textContent = r.model;
+      row.insertCell().textContent = r.duration.toFixed(2) + 's';
+      row.insertCell().textContent = (r.input_tokens + r.output_tokens) || '-';
+    }});
+  }} catch (e) {{}}
+}}
+
 setInterval(updateLogs, 2000);
+setInterval(() => {{ if (document.getElementById('stats-page').classList.contains('active')) updateStats(); }}, 5000);
 updateLogs();
 </script>
 </body></html>"""
@@ -579,10 +710,9 @@ updateLogs();
             with urllib.request.urlopen(req, timeout=10) as resp:
                 models_data = json.loads(resp.read().decode("utf-8"))
                 available_models = extract_model_ids(models_data)
-                if model in available_models:
-                    return self._send(200, {"ok": True})
-                else:
-                    return self._send(200, {"ok": False, "message": f"Model '{model}' not found in your account's available models."})
+                # Keep only valid NIM models
+                available_models = [m for m in available_models if m and not m.startswith("claude-") and "anthropic" not in m.lower()]
+                return self._send(200, {"ok": True, "models": available_models})
         except urllib.error.HTTPError as e:
             msg = str(e)
             try:

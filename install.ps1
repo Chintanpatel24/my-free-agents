@@ -1,6 +1,6 @@
 param(
   [string]$RepoUrl = $env:FREE_CLAUDE_CODE_REPO,
-  [string]$Branch = $(if ($env:FREE_CLAUDE_CODE_BRANCH) { $env:FREE_CLAUDE_CODE_BRANCH } else { 'main' })
+  [string]$Branch = $(if ($env:FREE_CLAUDE_CODE_BRANCH) { $env:FREE_CLAUDE_CODE_BRANCH } else { 'dev' })
 )
 $ErrorActionPreference = 'Stop'
 if (-not $RepoUrl) { $RepoUrl = 'https://github.com/Chintanpatel24/my-free-claudecode.git' }

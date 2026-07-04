@@ -6,7 +6,7 @@ if [ -f "$SCRIPT_DIR/scripts/install.sh" ] && [ -f "$SCRIPT_DIR/pyproject.toml" 
   exec bash "$SCRIPT_DIR/scripts/install.sh" "$@"
 fi
 REPO_URL="${FREE_CLAUDE_CODE_REPO:-https://github.com/Chintanpatel24/my-free-claudecode.git}"
-BRANCH="${FREE_CLAUDE_CODE_BRANCH:-main}"
+BRANCH="${FREE_CLAUDE_CODE_BRANCH:-dev}"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 command -v git >/dev/null 2>&1 || { echo "git is required for update." >&2; exit 1; }

@@ -29,16 +29,6 @@ SENSITIVE_KEYS = ("API", "API_KEY")
 
 LOG_QUEUE: collections.deque[str] = collections.deque(maxlen=50)
 
-# Statistics tracking
-STATS = {
-    "total_input_tokens": 0,
-    "total_output_tokens": 0,
-    "request_count": 0,
-    "recent_requests": collections.deque(maxlen=20),  # Store last 20 requests: {timestamp, model, duration, tokens, status}
-    "history": collections.deque(maxlen=50), # Full prompt/response history
-    "latency_data": collections.deque(maxlen=100), # Cap latency data to prevent memory leak
-}
-
 # Used only if NVIDIA's /models endpoint is temporarily unavailable. The real
 # /models response is preferred whenever the user's key can access it.
 NVIDIA_FEATURED_MODELS_URL = "https://assets.ngc.nvidia.com/products/api-catalog/featured-models.json"
@@ -316,12 +306,6 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(log_text.encode("utf-8"))
             return
-        if path == "/admin/stats":
-            stats_data = dict(STATS)
-            stats_data["recent_requests"] = list(STATS["recent_requests"])
-            stats_data["history"] = list(STATS["history"])
-            stats_data["latency_data"] = list(STATS["latency_data"])
-            return self._send(200, stats_data)
         if path == "/admin/version":
             try:
                 req = urllib.request.Request("https://api.github.com/repos/Chintanpatel24/my-free-claudecode/releases/latest", headers={"User-Agent": "Claude-NIM-Proxy"})
@@ -371,32 +355,9 @@ class Handler(BaseHTTPRequestHandler):
             upstream = build_openai_request(body, upstream_model, max_tokens)
             resp = call_openai_compatible(provider, upstream)
             if body.get("stream"):
-                return self._pipe_stream(resp, body.get("model") or values.get("ANTHROPIC_MODEL", "free-claude-code"), start_time, upstream_model, body.get("messages", []))
+                return self._pipe_stream(resp, body.get("model") or values.get("ANTHROPIC_MODEL", "free-claude-code"), start_time, upstream_model)
             data = json.loads(resp.read().decode("utf-8"))
             anthropic_resp = openai_to_anthropic(data, body.get("model") or values.get("ANTHROPIC_MODEL", "free-claude-code"))
-
-            usage = data.get("usage") or {}
-            in_t = usage.get("prompt_tokens", 0)
-            out_t = usage.get("completion_tokens", 0)
-            STATS["total_input_tokens"] += in_t
-            STATS["total_output_tokens"] += out_t
-            STATS["request_count"] += 1
-            STATS["recent_requests"].append({
-                "timestamp": time.time(),
-                "model": upstream_model,
-                "duration": time.time() - start_time,
-                "input_tokens": in_t,
-                "output_tokens": out_t,
-                "status": 200
-            })
-            STATS["latency_data"].append({"t": time.time(), "d": time.time() - start_time})
-
-            STATS["history"].append({
-                "timestamp": time.time(),
-                "model": upstream_model,
-                "messages": body.get("messages", []),
-                "response": anthropic_resp.get("content", [])
-            })
             return self._send(200, anthropic_resp)
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "replace")
@@ -420,7 +381,7 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
             return False
 
-    def _pipe_stream(self, resp, request_model: str, start_time: float, upstream_model: str, messages: List[Dict[str, Any]]):
+    def _pipe_stream(self, resp, request_model: str, start_time: float, upstream_model: str):
         try:
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -482,12 +443,6 @@ class Handler(BaseHTTPRequestHandler):
             self._sse("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}})
             self._sse("content_block_stop", {"type": "content_block_stop", "index": 0})
 
-        STATS["request_count"] += 1
-        duration = time.time() - start_time
-        STATS["recent_requests"].append({"timestamp": time.time(), "model": upstream_model, "duration": duration, "input_tokens": 0, "output_tokens": 0, "status": 200})
-        STATS["latency_data"].append({"t": time.time(), "d": duration})
-        STATS["history"].append({"timestamp": time.time(), "model": upstream_model, "messages": messages, "response": [{"type": "text", "text": "[Streamed Content]"}]})
-
         self._sse("message_delta", {"type": "message_delta", "delta": {"stop_reason": finish, "stop_sequence": None}, "usage": {"output_tokens": 0}})
         self._sse("message_stop", {"type": "message_stop"})
         self.close_connection = True
@@ -533,19 +488,10 @@ class Handler(BaseHTTPRequestHandler):
   .status {{ margin-top: 1rem; font-weight: bold; padding: 0.5rem; border-radius: 4px; display: none; }}
   .status.success {{ background: #28a745; color: #fff; display: block; }}
   .status.error {{ background: #dc3545; color: #fff; display: block; }}
-  .stat-card {{ display: inline-block; background: var(--section); padding: 1rem; border: 1px solid var(--border); border-radius: 8px; margin-right: 1rem; margin-bottom: 1rem; min-width: 150px; }}
-  .stat-value {{ font-size: 1.5rem; font-weight: bold; color: var(--btn); }}
-  .stat-label {{ font-size: 0.85rem; opacity: 0.8; }}
-  table {{ width: 100%; border-collapse: collapse; margin-top: 1rem; }}
-  th, td {{ padding: .75rem; text-align: left; border-bottom: 1px solid var(--border); font-size: 0.9rem; }}
-  .page {{ display: none; }}
-  .page.active {{ display: block; }}
 </style></head><body>
 <div class="sidebar">
   <h2 style="font-size: 1.2rem; margin-bottom: 1.5rem;">Claude NIM Proxy</h2>
   <a onclick="showPage('config')" id="nav-config" class="active">Configuration</a>
-  <a onclick="showPage('stats')" id="nav-stats">Statistics</a>
-  <a onclick="showPage('history')" id="nav-history">History</a>
   <a onclick="showPage('logs')" id="nav-logs">Live Logs</a>
   <div style="margin-top:auto; padding-top:1rem; border-top:1px solid var(--border);">
     <button onclick="launchClaude()" style="width:100%; font-size:0.8rem; padding:0.5rem;">Launch Claude</button>
@@ -570,18 +516,6 @@ class Handler(BaseHTTPRequestHandler):
       </form>
       <section><h3>System Info</h3><p>Server URL: <code>http://{html.escape(values.get('HOST', DEFAULT_HOST))}:{html.escape(values.get('PORT', DEFAULT_PORT))}</code></p></section>
     </div>
-    <div id="stats-page" class="page">
-      <h1>Statistics</h1>
-      <div id="statsContainer">
-        <div class="stat-card"><div class="stat-value" id="stat-requests">0</div><div class="stat-label">Total Requests</div></div>
-        <div class="stat-card"><div class="stat-value" id="stat-input">0</div><div class="stat-label">Input Tokens</div></div>
-        <div class="stat-card"><div class="stat-value" id="stat-output">0</div><div class="stat-label">Output Tokens</div></div>
-        <div class="stat-card"><div class="stat-value" id="stat-savings">$0.00</div><div class="stat-label">Estimated Savings</div></div>
-      </div>
-      <h3>Recent Requests</h3>
-      <table id="requestsTable"><thead><tr><th>Time</th><th>Model</th><th>Duration</th><th>Tokens</th></tr></thead><tbody></tbody></table>
-    </div>
-    <div id="history-page" class="page"><h1>Request History</h1><p>Secure local storage of recent requests.</p><div id="historyList"></div></div>
     <div id="logs-page" class="page">
       <h1>Live Activity Logs</h1>
       <div id="updateBanner" style="display:none; background: #fff3cd; color: #856404; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid #ffeeba;">New version available! Latest: <span id="latestVersion"></span>. Update using the script in README.</div>
@@ -598,8 +532,6 @@ function showPage(id) {{
   document.querySelectorAll('.sidebar a').forEach(a => a.classList.remove('active'));
   document.getElementById(id + '-page').classList.add('active');
   document.getElementById('nav-' + id).classList.add('active');
-  if (id === 'stats') updateStats();
-  if (id === 'history') updateHistory();
 }}
 async function testConnection() {{
   const status = document.getElementById('testStatus');
@@ -633,23 +565,6 @@ async function updateLogs() {{
     if (atBottom) viewer.scrollTop = viewer.scrollHeight;
   }} catch (e) {{}}
 }}
-async function updateHistory() {{
-  try {{
-    const resp = await fetch('/admin/stats');
-    const data = await resp.json();
-    const container = document.getElementById('historyList');
-    container.innerHTML = '';
-    data.history.reverse().forEach(h => {{
-      const div = document.createElement('div'); div.className = 'stat-card'; div.style.display = 'block'; div.style.width = '100%';
-      const prompt = h.messages.map(m => `<b>${{m.role}}</b>: ${{m.content}}`).join('<br>');
-      const respText = h.response.map(r => r.text).join('\\n');
-      div.innerHTML = `<div style="font-size:0.8rem; opacity:0.6;">${{new Date(h.timestamp * 1000).toLocaleString()}} - ${{h.model}}</div>
-                       <div style="margin-top:0.5rem; max-height: 100px; overflow-y:auto; border-bottom: 1px solid var(--border); padding-bottom:0.5rem;">${{prompt}}</div>
-                       <div style="margin-top:0.5rem; max-height: 100px; overflow-y:auto; color: var(--btn);">${{respText}}</div>`;
-      container.appendChild(div);
-    }});
-  }} catch (e) {{}}
-}}
 async function checkVersion() {{
   try {{
     const resp = await fetch('/admin/version');
@@ -661,24 +576,6 @@ async function checkVersion() {{
   }} catch (e) {{}}
 }}
 async function exportLogs() {{ window.location.href = '/admin/logs/export'; }}
-async function updateStats() {{
-  try {{
-    const resp = await fetch('/admin/stats');
-    const data = await resp.json();
-    document.getElementById('stat-requests').textContent = data.request_count;
-    document.getElementById('stat-input').textContent = data.total_input_tokens;
-    document.getElementById('stat-output').textContent = data.total_output_tokens;
-    const savings = (data.total_input_tokens * 0.000003) + (data.total_output_tokens * 0.000015);
-    document.getElementById('stat-savings').textContent = '$' + savings.toFixed(2);
-    const tbody = document.querySelector('#requestsTable tbody'); tbody.innerHTML = '';
-    data.recent_requests.reverse().forEach(r => {{
-      const row = tbody.insertRow();
-      row.insertCell().textContent = new Date(r.timestamp * 1000).toLocaleTimeString();
-      row.insertCell().textContent = r.model; row.insertCell().textContent = r.duration.toFixed(2) + 's';
-      row.insertCell().textContent = (r.input_tokens + r.output_tokens) || '-';
-    }});
-  }} catch (e) {{}}
-}}
 async function launchClaude() {{
   const resp = await fetch('/admin/launch', {{ method: 'POST' }});
   const data = await resp.json(); alert('To start Claude with the proxy, run this command in your terminal:\\n\\n' + data.command);
@@ -696,7 +593,6 @@ async function updateCurrentModel() {{
   }} catch (e) {{}}
 }}
 setInterval(updateLogs, 2000);
-setInterval(() => {{ if (document.getElementById('stats-page').classList.contains('active')) updateStats(); }}, 5000);
 updateLogs(); checkVersion(); updateCurrentModel();
 </script></body></html>"""
         return self._send_text(200, html_doc)

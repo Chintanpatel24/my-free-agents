@@ -36,6 +36,7 @@ STATS = {
     "request_count": 0,
     "recent_requests": collections.deque(maxlen=20),  # Store last 20 requests: {timestamp, model, duration, tokens, status}
     "history": collections.deque(maxlen=50), # Full prompt/response history
+    "latency_data": collections.deque(maxlen=100), # Cap latency data to prevent memory leak
 }
 
 # Used only if NVIDIA's /models endpoint is temporarily unavailable. The real
@@ -311,6 +312,7 @@ class Handler(BaseHTTPRequestHandler):
             stats_data = dict(STATS)
             stats_data["recent_requests"] = list(STATS["recent_requests"])
             stats_data["history"] = list(STATS["history"])
+            stats_data["latency_data"] = list(STATS["latency_data"][-100:])
             return self._send(200, stats_data)
         if path == "/admin/version":
             # Simple check for latest version from GitHub
@@ -350,6 +352,9 @@ class Handler(BaseHTTPRequestHandler):
             # This is a bit "magical" but we can try to tell the user how to launch
             # Since we can't easily open a terminal from a web browser safely.
             return self._send(200, {"ok": True, "command": "my-claudecode"})
+        if path == "/admin/current-model":
+            values = load_env()
+            return self._send(200, {"model": values.get("NVIDIA_NIM_MODEL", "")})
         return self._send(404, {"type": "error", "error": {"type": "not_found", "message": path}})
 
     def _messages(self):
@@ -383,6 +388,7 @@ class Handler(BaseHTTPRequestHandler):
                 "output_tokens": out_t,
                 "status": 200
             })
+            STATS["latency_data"].append({"t": time.time(), "d": time.time() - start_time})
 
             # Save to history
             STATS["history"].append({
@@ -609,6 +615,7 @@ class Handler(BaseHTTPRequestHandler):
         <div class="stat-card"><div class="stat-value" id="stat-requests">0</div><div class="stat-label">Total Requests</div></div>
         <div class="stat-card"><div class="stat-value" id="stat-input">0</div><div class="stat-label">Input Tokens</div></div>
         <div class="stat-card"><div class="stat-value" id="stat-output">0</div><div class="stat-label">Output Tokens</div></div>
+        <div class="stat-card"><div class="stat-value" id="stat-savings">$0.00</div><div class="stat-label">Estimated Savings</div></div>
       </div>
       <h3>Recent Requests</h3>
       <table id="requestsTable">
@@ -670,6 +677,15 @@ async function testConnection() {{
             const select = document.getElementById('modelSelect');
             const current = select.value;
             select.innerHTML = '';
+        // Add a placeholder if nothing is selected
+        if (!current) {{
+          const p = document.createElement('option');
+          p.value = '';
+          p.textContent = '-- Select a Model --';
+          p.disabled = true;
+          p.selected = true;
+          select.appendChild(p);
+        }}
             result.models.forEach(m => {{
               const opt = document.createElement('option');
               opt.value = m;
@@ -742,6 +758,10 @@ async function updateStats() {{
     document.getElementById('stat-input').textContent = data.total_input_tokens;
     document.getElementById('stat-output').textContent = data.total_output_tokens;
 
+    // Simple savings calculation: $3/1M input, $15/1M output (average Claude 3.5 Sonnet prices)
+    const savings = (data.total_input_tokens * 0.000003) + (data.total_output_tokens * 0.000015);
+    document.getElementById('stat-savings').textContent = '$' + savings.toFixed(2);
+
     const tbody = document.querySelector('#requestsTable tbody');
     tbody.innerHTML = '';
     data.recent_requests.reverse().forEach(r => {{
@@ -762,8 +782,35 @@ async function launchClaude() {{
   alert('To start Claude with the proxy, run this command in your terminal:\\n\\n' + data.command);
 }}
 
+async function updateCurrentModel() {{
+  try {{
+    const resp = await fetch('/admin/current-model');
+    const data = await resp.json();
+    if (data.model) {{
+        const select = document.getElementById('modelSelect');
+        // If the model is not in the list, add it as a temporary option
+        let found = false;
+        for (let i = 0; i < select.options.length; i++) {{
+            if (select.options[i].value === data.model) {{
+                select.options[i].selected = true;
+                found = true;
+                break;
+            }}
+        }}
+        if (!found) {{
+            const opt = document.createElement('option');
+            opt.value = data.model;
+            opt.textContent = data.model + ' (Current)';
+            opt.selected = true;
+            select.appendChild(opt);
+        }}
+    }}
+  }} catch (e) {{}}
+}}
+
 updateLogs();
 checkVersion();
+updateCurrentModel();
 </script>
 </body></html>"""
         return self._send_text(200, html_doc)

@@ -11,7 +11,7 @@ import urllib.request
 import uuid
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional, List
 from urllib.parse import parse_qs, urlparse
 
 from .anthropic import build_openai_request, estimate_tokens, openai_to_anthropic
@@ -307,23 +307,32 @@ class Handler(BaseHTTPRequestHandler):
             return self._admin_get()
         if path == "/admin/logs":
             return self._send(200, {"logs": list(LOG_QUEUE)})
+        if path == "/admin/logs/export":
+            log_text = "\n".join(list(LOG_QUEUE))
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Disposition", "attachment; filename=claude-nim-proxy.log")
+            self.send_header("Content-Length", str(len(log_text)))
+            self.end_headers()
+            self.wfile.write(log_text.encode("utf-8"))
+            return
         if path == "/admin/stats":
-            # Return stats as JSON for the UI to fetch
             stats_data = dict(STATS)
             stats_data["recent_requests"] = list(STATS["recent_requests"])
             stats_data["history"] = list(STATS["history"])
             stats_data["latency_data"] = list(STATS["latency_data"])
             return self._send(200, stats_data)
         if path == "/admin/version":
-            # Simple check for latest version from GitHub
             try:
-                # Use a short timeout to not block
                 req = urllib.request.Request("https://api.github.com/repos/Chintanpatel24/my-free-claudecode/releases/latest", headers={"User-Agent": "Claude-NIM-Proxy"})
                 with urllib.request.urlopen(req, timeout=2) as r:
                     data = json.loads(r.read().decode("utf-8"))
                     return self._send(200, {"latest": data.get("tag_name", "unknown")})
             except:
                 return self._send(200, {"latest": "unknown"})
+        if path == "/admin/current-model":
+            values = load_env()
+            return self._send(200, {"model": values.get("NVIDIA_NIM_MODEL", "")})
         return self._send(404, {"type": "error", "error": {"type": "not_found", "message": path}})
 
     def do_POST(self):
@@ -337,7 +346,6 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/v1/messages":
             return self._messages()
         if path == "/v1/auth/status" or path == "/v1/identify":
-            # Mock identity for Claude Code
             return self._send(200, {
                 "id": "user_local_proxy",
                 "email": "proxy@localhost",
@@ -349,31 +357,24 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/admin/test":
             return self._admin_test()
         if path == "/admin/launch":
-            # This is a bit "magical" but we can try to tell the user how to launch
-            # Since we can't easily open a terminal from a web browser safely.
             return self._send(200, {"ok": True, "command": "my-claudecode"})
-        if path == "/admin/current-model":
-            values = load_env()
-            return self._send(200, {"model": values.get("NVIDIA_NIM_MODEL", "")})
         return self._send(404, {"type": "error", "error": {"type": "not_found", "message": path}})
 
     def _messages(self):
         start_time = time.time()
-        upstream_model = "unknown"
         try:
             values = load_env()
             provider = get_provider(values)
             body = self._read_json()
-            max_tokens = int(values.get("DEFAULT_MAX_TOKENS", "4096") or "4096")
             upstream_model = selected_upstream_model(body, provider, values)
+            max_tokens = int(values.get("DEFAULT_MAX_TOKENS", "4096") or "4096")
             upstream = build_openai_request(body, upstream_model, max_tokens)
             resp = call_openai_compatible(provider, upstream)
             if body.get("stream"):
-                return self._pipe_stream(resp, body.get("model") or values.get("ANTHROPIC_MODEL", "free-claude-code"), start_time, upstream_model)
+                return self._pipe_stream(resp, body.get("model") or values.get("ANTHROPIC_MODEL", "free-claude-code"), start_time, upstream_model, body.get("messages", []))
             data = json.loads(resp.read().decode("utf-8"))
             anthropic_resp = openai_to_anthropic(data, body.get("model") or values.get("ANTHROPIC_MODEL", "free-claude-code"))
 
-            # Update stats
             usage = data.get("usage") or {}
             in_t = usage.get("prompt_tokens", 0)
             out_t = usage.get("completion_tokens", 0)
@@ -390,31 +391,21 @@ class Handler(BaseHTTPRequestHandler):
             })
             STATS["latency_data"].append({"t": time.time(), "d": time.time() - start_time})
 
-            # Save to history
             STATS["history"].append({
                 "timestamp": time.time(),
                 "model": upstream_model,
                 "messages": body.get("messages", []),
                 "response": anthropic_resp.get("content", [])
             })
-
             return self._send(200, anthropic_resp)
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "replace")
             try:
-                # Try to extract a cleaner message from JSON if possible
                 err_obj = json.loads(detail)
-                if "detail" in err_obj:
-                    detail = err_obj["detail"]
-                elif "error" in err_obj and "message" in err_obj["error"]:
-                    detail = err_obj["error"]["message"]
-            except:
-                pass
+                if "detail" in err_obj: detail = err_obj["detail"]
+                elif "error" in err_obj and "message" in err_obj["error"]: detail = err_obj["error"]["message"]
+            except: pass
             msg = f"NVIDIA NIM Error ({e.code}): {detail}"
-            if e.code == 401:
-                msg = "NVIDIA NIM API Key is invalid or expired (401 Unauthorized). Please check your settings in the Admin UI."
-            elif e.code == 404:
-                msg = f"Model '{upstream_model}' not found or not accessible with your API key (404 Not Found)."
             return self._send(e.code, {"type": "error", "error": {"type": "upstream_error", "message": msg[:4000]}})
         except Exception as e:
             return self._send(500, {"type": "error", "error": {"type": "proxy_error", "message": str(e)}})
@@ -429,7 +420,7 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
             return False
 
-    def _pipe_stream(self, resp, request_model: str, start_time: float, upstream_model: str):
+    def _pipe_stream(self, resp, request_model: str, start_time: float, upstream_model: str, messages: List[Dict[str, Any]]):
         try:
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -455,13 +446,11 @@ class Handler(BaseHTTPRequestHandler):
                     part, buffer = buffer.split("\n\n", 1)
                     line = next((x for x in part.splitlines() if x.startswith("data:")), "")
                     data = line[5:].strip() if line else ""
-                    if not data or data == "[DONE]":
-                        continue
+                    if not data or data == "[DONE]": continue
                     obj = json.loads(data)
                     choice = (obj.get("choices") or [{}])[0]
                     delta = choice.get("delta") or {}
-                    if choice.get("finish_reason"):
-                        finish = "tool_use" if choice.get("finish_reason") == "tool_calls" else "end_turn"
+                    if choice.get("finish_reason"): finish = "tool_use" if choice.get("finish_reason") == "tool_calls" else "end_turn"
                     text = delta.get("content")
                     if text:
                         if not text_started:
@@ -471,18 +460,13 @@ class Handler(BaseHTTPRequestHandler):
                     for tc in delta.get("tool_calls") or []:
                         idx = int(tc.get("index", len(tool_calls)))
                         cur = tool_calls.setdefault(idx, {"id": "", "name": "", "args": ""})
-                        if tc.get("id"):
-                            cur["id"] = tc.get("id")
+                        if tc.get("id"): cur["id"] = tc.get("id")
                         fn = tc.get("function") or {}
-                        if fn.get("name"):
-                            cur["name"] += fn.get("name")
-                        if fn.get("arguments"):
-                            cur["args"] += fn.get("arguments")
+                        if fn.get("name"): cur["name"] += fn.get("name")
+                        if fn.get("arguments"): cur["args"] += fn.get("arguments")
                         finish = "tool_use"
-            except BrokenPipeError:
-                return
-            except Exception:
-                continue
+            except BrokenPipeError: return
+            except Exception: continue
         block_index = 0
         if text_started:
             self._sse("content_block_stop", {"type": "content_block_stop", "index": text_index})
@@ -497,19 +481,12 @@ class Handler(BaseHTTPRequestHandler):
         if not text_started and not tool_calls:
             self._sse("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}})
             self._sse("content_block_stop", {"type": "content_block_stop", "index": 0})
-        # Update stats for streaming
+
         STATS["request_count"] += 1
         duration = time.time() - start_time
-        # We don't have easy token counts for stream without more complex parsing
-        # but we can estimate or just log the duration.
-        STATS["recent_requests"].append({
-            "timestamp": time.time(),
-            "model": upstream_model,
-            "duration": duration,
-            "input_tokens": 0, # Estimated could go here
-            "output_tokens": 0,
-            "status": 200
-        })
+        STATS["recent_requests"].append({"timestamp": time.time(), "model": upstream_model, "duration": duration, "input_tokens": 0, "output_tokens": 0, "status": 200})
+        STATS["latency_data"].append({"t": time.time(), "d": duration})
+        STATS["history"].append({"timestamp": time.time(), "model": upstream_model, "messages": messages, "response": [{"type": "text", "text": "[Streamed Content]"}]})
 
         self._sse("message_delta", {"type": "message_delta", "delta": {"stop_reason": finish, "stop_sequence": None}, "usage": {"output_tokens": 0}})
         self._sse("message_stop", {"type": "message_stop"})
@@ -520,33 +497,24 @@ class Handler(BaseHTTPRequestHandler):
         return host in ("127.0.0.1", "::1", "localhost")
 
     def _admin_get(self):
-        if not self._is_loopback():
-            return self._send_text(403, "Admin UI is only available from localhost", "text/plain")
+        if not self._is_loopback(): return self._send_text(403, "Admin UI is only available from localhost", "text/plain")
         values = load_env()
         provider = get_provider(values)
         api_value = provider.api_key or ""
         current_model = provider.model
-
         models = []
         try:
-            if api_value and api_value != "your-api-key":
-                models, _ = list_provider_models(provider)
-        except Exception:
-            pass
-
+            if api_value and api_value != "your-api-key": models, _ = list_provider_models(provider)
+        except Exception: pass
         if not models:
             models = FALLBACK_NVIDIA_NIM_MODELS
-            if current_model and current_model not in models:
-                models = [current_model] + models
-
+            if current_model and current_model not in models: models = [current_model] + models
         options = "".join(f'<option value="{html.escape(m)}"{ " selected" if m == current_model else ""}>{html.escape(m)}</option>' for m in models)
 
         html_doc = f"""<!doctype html><html><head><meta charset="utf-8"><title>My ClaudeCode Server Admin</title>
 <style>
   :root {{ --bg: #fff; --text: #333; --border: #ddd; --section: #f9f9f9; --btn: #007bff; --btn-text: #fff; --code-bg: #eee; --sidebar-bg: #f1f1f1; }}
-  @media (prefers-color-scheme: dark) {{
-    :root {{ --bg: #1e1e1e; --text: #e0e0e0; --border: #444; --section: #2d2d2d; --btn: #375a7f; --btn-text: #fff; --code-bg: #333; --sidebar-bg: #252525; }}
-  }}
+  @media (prefers-color-scheme: dark) {{ :root {{ --bg: #1e1e1e; --text: #e0e0e0; --border: #444; --section: #2d2d2d; --btn: #375a7f; --btn-text: #fff; --code-bg: #333; --sidebar-bg: #252525; }} }}
   body {{ font-family: system-ui, -apple-system, sans-serif; margin: 0; display: flex; height: 100vh; background: var(--bg); color: var(--text); }}
   .sidebar {{ width: 200px; background: var(--sidebar-bg); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 1rem; }}
   .sidebar a {{ color: var(--text); text-decoration: none; padding: .75rem 1rem; border-radius: 6px; margin-bottom: .5rem; font-weight: 600; cursor: pointer; }}
@@ -573,7 +541,6 @@ class Handler(BaseHTTPRequestHandler):
   .page {{ display: none; }}
   .page.active {{ display: block; }}
 </style></head><body>
-
 <div class="sidebar">
   <h2 style="font-size: 1.2rem; margin-bottom: 1.5rem;">Claude NIM Proxy</h2>
   <a onclick="showPage('config')" id="nav-config" class="active">Configuration</a>
@@ -584,7 +551,6 @@ class Handler(BaseHTTPRequestHandler):
     <button onclick="launchClaude()" style="width:100%; font-size:0.8rem; padding:0.5rem;">Launch Claude</button>
   </div>
 </div>
-
 <div class="content">
   <div class="container">
     <div id="config-page" class="page active">
@@ -602,15 +568,10 @@ class Handler(BaseHTTPRequestHandler):
           <div id="testStatus" class="status"></div>
         </section>
       </form>
-      <section>
-        <h3>System Info</h3>
-        <p>Server URL: <code>http://{html.escape(values.get('HOST', DEFAULT_HOST))}:{html.escape(values.get('PORT', DEFAULT_PORT))}</code></p>
-      </section>
+      <section><h3>System Info</h3><p>Server URL: <code>http://{html.escape(values.get('HOST', DEFAULT_HOST))}:{html.escape(values.get('PORT', DEFAULT_PORT))}</code></p></section>
     </div>
-
     <div id="stats-page" class="page">
       <h1>Statistics</h1>
-      <p>Usage and performance metrics.</p>
       <div id="statsContainer">
         <div class="stat-card"><div class="stat-value" id="stat-requests">0</div><div class="stat-label">Total Requests</div></div>
         <div class="stat-card"><div class="stat-value" id="stat-input">0</div><div class="stat-label">Input Tokens</div></div>
@@ -618,30 +579,19 @@ class Handler(BaseHTTPRequestHandler):
         <div class="stat-card"><div class="stat-value" id="stat-savings">$0.00</div><div class="stat-label">Estimated Savings</div></div>
       </div>
       <h3>Recent Requests</h3>
-      <table id="requestsTable">
-        <thead><tr><th>Time</th><th>Model</th><th>Duration</th><th>Tokens</th></tr></thead>
-        <tbody></tbody>
-      </table>
+      <table id="requestsTable"><thead><tr><th>Time</th><th>Model</th><th>Duration</th><th>Tokens</th></tr></thead><tbody></tbody></table>
     </div>
-
-    <div id="history-page" class="page">
-      <h1>Request History</h1>
-      <p>Secure local storage of recent requests.</p>
-      <div id="historyList"></div>
-    </div>
-
+    <div id="history-page" class="page"><h1>Request History</h1><p>Secure local storage of recent requests.</p><div id="historyList"></div></div>
     <div id="logs-page" class="page">
       <h1>Live Activity Logs</h1>
-      <div id="updateBanner" style="display:none; background: #fff3cd; color: #856404; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid #ffeeba;">
-        New version available! Latest: <span id="latestVersion"></span>. Update using the script in README.
-      </div>
+      <div id="updateBanner" style="display:none; background: #fff3cd; color: #856404; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid #ffeeba;">New version available! Latest: <span id="latestVersion"></span>. Update using the script in README.</div>
       <section>
+        <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;"><h3 style="margin:0;">Logs</h3><button onclick="exportLogs()" class="secondary" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">Export Logs</button></div>
         <div id="logViewer" class="logs">Loading logs...</div>
       </section>
     </div>
   </div>
 </div>
-
 <script>
 function showPage(id) {{
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -651,60 +601,27 @@ function showPage(id) {{
   if (id === 'stats') updateStats();
   if (id === 'history') updateHistory();
 }}
-
 async function testConnection() {{
   const status = document.getElementById('testStatus');
-  status.className = 'status';
-  status.textContent = 'Verifying and fetching models...';
-  status.style.display = 'block';
-
+  status.className = 'status'; status.textContent = 'Verifying and fetching models...'; status.style.display = 'block';
   const form = document.getElementById('configForm');
   const formData = new FormData(form);
-  const data = {{}};
-  formData.forEach((value, key) => data[key] = value);
-
+  const data = {{}}; formData.forEach((value, key) => data[key] = value);
   try {{
-    const resp = await fetch('/admin/test', {{
-      method: 'POST',
-      headers: {{ 'Content-Type': 'application/json' }},
-      body: JSON.stringify(data)
-    }});
+    const resp = await fetch('/admin/test', {{ method: 'POST', headers: {{ 'Content-Type': 'application/json' }}, body: JSON.stringify(data) }});
     const result = await resp.json();
-        if (result.ok) {{
-          status.className = 'status success';
-          status.textContent = '✅ Success: Connection verified.';
-          if (result.models && result.models.length > 0) {{
-            const select = document.getElementById('modelSelect');
-            const current = select.value;
-            select.innerHTML = '';
-        // Add a placeholder if nothing is selected
-        if (!current) {{
-          const p = document.createElement('option');
-          p.value = '';
-          p.textContent = '-- Select a Model --';
-          p.disabled = true;
-          p.selected = true;
-          select.appendChild(p);
-        }}
-            result.models.forEach(m => {{
-              const opt = document.createElement('option');
-              opt.value = m;
-              opt.textContent = m;
-              if (m === current) opt.selected = true;
-              select.appendChild(opt);
-            }});
-            status.textContent += ' ' + result.models.length + ' models updated in list.';
-          }}
-        }} else {{
-          status.className = 'status error';
-          status.textContent = '❌ Error: ' + result.message;
-        }}
-  }} catch (e) {{
-    status.className = 'status error';
-    status.textContent = '❌ Error: ' + e.message;
-  }}
+    if (result.ok) {{
+      status.className = 'status success'; status.textContent = '✅ Success: Connection verified.';
+      if (result.models && result.models.length > 0) {{
+        const select = document.getElementById('modelSelect');
+        const current = select.value; select.innerHTML = '';
+        if (!current) {{ const p = document.createElement('option'); p.value = ''; p.textContent = '-- Select a Model --'; p.disabled = true; p.selected = true; select.appendChild(p); }}
+        result.models.forEach(m => {{ const opt = document.createElement('option'); opt.value = m; opt.textContent = m; if (m === current) opt.selected = true; select.appendChild(opt); }});
+        status.textContent += ' ' + result.models.length + ' models updated in list.';
+      }}
+    }} else {{ status.className = 'status error'; status.textContent = '❌ Error: ' + result.message; }}
+  }} catch (e) {{ status.className = 'status error'; status.textContent = '❌ Error: ' + e.message; }}
 }}
-
 async function updateLogs() {{
   if (!document.getElementById('logs-page').classList.contains('active')) return;
   try {{
@@ -716,7 +633,6 @@ async function updateLogs() {{
     if (atBottom) viewer.scrollTop = viewer.scrollHeight;
   }} catch (e) {{}}
 }}
-
 async function updateHistory() {{
   try {{
     const resp = await fetch('/admin/stats');
@@ -724,10 +640,7 @@ async function updateHistory() {{
     const container = document.getElementById('historyList');
     container.innerHTML = '';
     data.history.reverse().forEach(h => {{
-      const div = document.createElement('div');
-      div.className = 'stat-card';
-      div.style.display = 'block';
-      div.style.width = '100%';
+      const div = document.createElement('div'); div.className = 'stat-card'; div.style.display = 'block'; div.style.width = '100%';
       const prompt = h.messages.map(m => `<b>${{m.role}}</b>: ${{m.content}}`).join('<br>');
       const respText = h.response.map(r => r.text).join('\\n');
       div.innerHTML = `<div style="font-size:0.8rem; opacity:0.6;">${{new Date(h.timestamp * 1000).toLocaleString()}} - ${{h.model}}</div>
@@ -737,19 +650,17 @@ async function updateHistory() {{
     }});
   }} catch (e) {{}}
 }}
-
 async function checkVersion() {{
   try {{
     const resp = await fetch('/admin/version');
     const data = await resp.json();
     if (data.latest !== 'unknown') {{
       const banner = document.getElementById('updateBanner');
-      document.getElementById('latestVersion').textContent = data.latest;
-      banner.style.display = 'block';
+      document.getElementById('latestVersion').textContent = data.latest; banner.style.display = 'block';
     }}
   }} catch (e) {{}}
 }}
-
+async function exportLogs() {{ window.location.href = '/admin/logs/export'; }}
 async function updateStats() {{
   try {{
     const resp = await fetch('/admin/stats');
@@ -757,87 +668,53 @@ async function updateStats() {{
     document.getElementById('stat-requests').textContent = data.request_count;
     document.getElementById('stat-input').textContent = data.total_input_tokens;
     document.getElementById('stat-output').textContent = data.total_output_tokens;
-
-    // Simple savings calculation: $3/1M input, $15/1M output (average Claude 3.5 Sonnet prices)
     const savings = (data.total_input_tokens * 0.000003) + (data.total_output_tokens * 0.000015);
     document.getElementById('stat-savings').textContent = '$' + savings.toFixed(2);
-
-    const tbody = document.querySelector('#requestsTable tbody');
-    tbody.innerHTML = '';
+    const tbody = document.querySelector('#requestsTable tbody'); tbody.innerHTML = '';
     data.recent_requests.reverse().forEach(r => {{
       const row = tbody.insertRow();
       row.insertCell().textContent = new Date(r.timestamp * 1000).toLocaleTimeString();
-      row.insertCell().textContent = r.model;
-      row.insertCell().textContent = r.duration.toFixed(2) + 's';
+      row.insertCell().textContent = r.model; row.insertCell().textContent = r.duration.toFixed(2) + 's';
       row.insertCell().textContent = (r.input_tokens + r.output_tokens) || '-';
     }});
   }} catch (e) {{}}
 }}
-
-setInterval(updateLogs, 2000);
-setInterval(() => {{ if (document.getElementById('stats-page').classList.contains('active')) updateStats(); }}, 5000);
 async function launchClaude() {{
   const resp = await fetch('/admin/launch', {{ method: 'POST' }});
-  const data = await resp.json();
-  alert('To start Claude with the proxy, run this command in your terminal:\\n\\n' + data.command);
+  const data = await resp.json(); alert('To start Claude with the proxy, run this command in your terminal:\\n\\n' + data.command);
 }}
-
 async function updateCurrentModel() {{
   try {{
     const resp = await fetch('/admin/current-model');
     const data = await resp.json();
     if (data.model) {{
         const select = document.getElementById('modelSelect');
-        // If the model is not in the list, add it as a temporary option
         let found = false;
-        for (let i = 0; i < select.options.length; i++) {{
-            if (select.options[i].value === data.model) {{
-                select.options[i].selected = true;
-                found = true;
-                break;
-            }}
-        }}
-        if (!found) {{
-            const opt = document.createElement('option');
-            opt.value = data.model;
-            opt.textContent = data.model + ' (Current)';
-            opt.selected = true;
-            select.appendChild(opt);
-        }}
+        for (let i = 0; i < select.options.length; i++) {{ if (select.options[i].value === data.model) {{ select.options[i].selected = true; found = true; break; }} }}
+        if (!found) {{ const opt = document.createElement('option'); opt.value = data.model; opt.textContent = data.model + ' (Current)'; opt.selected = true; select.appendChild(opt); }}
     }}
   }} catch (e) {{}}
 }}
-
-updateLogs();
-checkVersion();
-updateCurrentModel();
-</script>
-</body></html>"""
+setInterval(updateLogs, 2000);
+setInterval(() => {{ if (document.getElementById('stats-page').classList.contains('active')) updateStats(); }}, 5000);
+updateLogs(); checkVersion(); updateCurrentModel();
+</script></body></html>"""
         return self._send_text(200, html_doc)
 
     def _admin_test(self):
-        if not self._is_loopback():
-            return self._send(403, {"ok": False, "message": "Admin UI is only available from localhost"})
+        if not self._is_loopback(): return self._send(403, {"ok": False, "message": "Admin UI is only available from localhost"})
         try:
             data = self._read_json()
             values = load_env()
             api_key = data.get("NVIDIA_NIM_API", "")
-            # If the value is masked, use the one from env.
-            if "…" in api_key:
-                api_key = get_provider(values).api_key
-
+            if "…" in api_key: api_key = get_provider(values).api_key
             model = data.get("NVIDIA_NIM_MODEL", values.get("NVIDIA_NIM_MODEL", DEFAULT_NVIDIA_NIM_MODEL))
-
-            if not api_key or api_key == "your-api-key":
-                return self._send(200, {"ok": False, "message": "API key is missing"})
-
-            # Simple test: call /models
+            if not api_key or api_key == "your-api-key": return self._send(200, {"ok": False, "message": "API key is missing"})
             url = f"{DEFAULT_NVIDIA_NIM_BASE_URL}/models"
             req = urllib.request.Request(url, headers={"Authorization": f"Bearer {api_key}"}, method="GET")
             with urllib.request.urlopen(req, timeout=10) as resp:
                 models_data = json.loads(resp.read().decode("utf-8"))
                 available_models = extract_model_ids(models_data)
-                # Keep only valid NIM models
                 available_models = [m for m in available_models if m and not m.startswith("claude-") and "anthropic" not in m.lower()]
                 return self._send(200, {"ok": True, "models": available_models})
         except urllib.error.HTTPError as e:
@@ -848,32 +725,19 @@ updateCurrentModel();
                 if "detail" in err_data: msg = err_data["detail"]
             except: pass
             return self._send(200, {"ok": False, "message": f"NVIDIA API Error: {msg}"})
-        except Exception as e:
-            return self._send(200, {"ok": False, "message": str(e)})
+        except Exception as e: return self._send(200, {"ok": False, "message": str(e)})
 
     def _admin_post(self):
-        if not self._is_loopback():
-            return self._send_text(403, "Admin UI is only available from localhost", "text/plain")
+        if not self._is_loopback(): return self._send_text(403, "Admin UI is only available from localhost", "text/plain")
         n = int(self.headers.get("Content-Length", "0") or "0")
         form = parse_qs(self.rfile.read(n).decode("utf-8"), keep_blank_values=True)
         updates: Dict[str, str] = {}
         allowed = {"NVIDIA_NIM_API", "NVIDIA_NIM_MODEL"}
         for k, v in form.items():
-            if k not in allowed:
-                continue
+            if k not in allowed: continue
             val = v[0].strip()
-            # Keep old key if the user submitted the masked value.
-            if k == "NVIDIA_NIM_API" and "…" in val:
-                continue
+            if k == "NVIDIA_NIM_API" and "…" in val: continue
             updates[k] = val
-
-        # Track last used model
-        if "NVIDIA_NIM_MODEL" in updates:
-            values = load_env()
-            old_model = values.get("NVIDIA_NIM_MODEL", "")
-            if old_model and old_model != updates["NVIDIA_NIM_MODEL"]:
-                updates["LAST_MODEL"] = old_model
-
         write_env_values(updates)
         self.send_response(303)
         self.send_header("Location", "/admin")
@@ -883,8 +747,7 @@ updateCurrentModel();
 class QuietThreadingHTTPServer(ThreadingHTTPServer):
     def handle_error(self, request, client_address):
         exc = sys.exc_info()[1]
-        if isinstance(exc, (BrokenPipeError, ConnectionResetError, socket.timeout)):
-            return
+        if isinstance(exc, (BrokenPipeError, ConnectionResetError, socket.timeout)): return
         super().handle_error(request, client_address)
 
 

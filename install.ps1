@@ -10,4 +10,4 @@ if ($LocalInstaller -and (Test-Path $LocalInstaller) -and (Test-Path (Join-Path 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Write-Host 'git is required for remote install.' -ForegroundColor Red; exit 1 }
 $Tmp = Join-Path ([IO.Path]::GetTempPath()) ('free-claude-code-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
-try { git clone --depth 1 --branch $Branch $RepoUrl (Join-Path $Tmp 'repo'); & (Join-Path $Tmp 'repo\scripts\install.ps1') @args } finally { Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $Tmp }
+try { git clone --depth 1 --branch $Branch $RepoUrl (Join-Path $Tmp 'repo'); Push-Location (Join-Path $Tmp 'repo'); & (Join-Path $Tmp 'repo\scripts\install.ps1') @args; Pop-Location } finally { Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $Tmp }

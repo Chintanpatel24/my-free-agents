@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import stat
 from dataclasses import dataclass
@@ -14,12 +15,12 @@ ENV_HEADER = """# Managed by My ClaudeCode Server /admin.
 # User asked for a clean env with only the NVIDIA NIM API value.
 # The app still accepts NVIDIA_NIM_API_KEY for backwards compatibility, but new
 # installs only create NVIDIA_NIM_API.
-DEFAULT_ENV = ENV_HEADER + """
-NVIDIA_NIM_API=your-api-key
-""".lstrip()
+DEFAULT_ENV = """# NVIDIA NIM API Key
+NVIDIA_NIM_API=
+"""
 
 DEFAULT_NVIDIA_NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"
-DEFAULT_NVIDIA_NIM_MODEL = "z-ai/glm-5.1"
+DEFAULT_NVIDIA_NIM_MODEL = ""
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = "2424"
 DEFAULT_MAX_TOKENS = "4096"
@@ -35,6 +36,29 @@ def app_home() -> Path:
 
 def env_path() -> Path:
     return app_home() / ".env"
+
+
+def settings_path() -> Path:
+    return app_home() / "settings.json"
+
+
+def load_settings() -> Dict[str, str]:
+    p = settings_path()
+    if p.exists():
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            pass
+    return {}
+
+
+def save_settings(updates: Dict[str, str]) -> None:
+    data = load_settings()
+    data.update(updates)
+    p = settings_path()
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
 
 
 def parse_env_text(text: str) -> Dict[str, str]:
@@ -57,6 +81,8 @@ def load_env() -> Dict[str, str]:
     p = env_path()
     if p.exists():
         values.update(parse_env_text(p.read_text(encoding="utf-8")))
+    # Layer settings.json over .env
+    values.update(load_settings())
     return values
 
 
@@ -77,18 +103,29 @@ def _api_value(values: Dict[str, str]) -> str:
 
 
 def write_env_values(updates: Dict[str, str]) -> None:
-    """Write a minimal user-facing .env.
-
-    NVIDIA_NIM_API, NVIDIA_NIM_MODEL and LAST_MODEL are persisted.
+    """Write a minimal user-facing .env for API Key only.
+    Other settings go to settings.json.
     """
     p = ensure_env()
     old = parse_env_text(p.read_text(encoding="utf-8"))
-    old.update({k: v for k, v in updates.items() if k})
-    api = _api_value(old)
-    model = old.get("NVIDIA_NIM_MODEL", DEFAULT_NVIDIA_NIM_MODEL)
-    last = old.get("LAST_MODEL", "")
-    content = ENV_HEADER + f"\nNVIDIA_NIM_API={api or 'your-api-key'}\nNVIDIA_NIM_MODEL={model}\nLAST_MODEL={last}\n"
-    p.write_text(content, encoding="utf-8")
+
+    # Separate API key from other settings
+    api_updates = {}
+    other_updates = {}
+    for k, v in updates.items():
+        if k in ("NVIDIA_NIM_API", "NVIDIA_NIM_API_KEY"):
+            api_updates[k] = v
+        else:
+            other_updates[k] = v
+
+    if other_updates:
+        save_settings(other_updates)
+
+    if api_updates:
+        old.update(api_updates)
+        api = _api_value(old)
+        content = f"# NVIDIA NIM API Key\nNVIDIA_NIM_API={api}\n"
+        p.write_text(content, encoding="utf-8")
     try:
         p.chmod(stat.S_IRUSR | stat.S_IWUSR)
     except OSError:
@@ -106,11 +143,13 @@ class ProviderConfig:
 
 def get_provider(values: Optional[Dict[str, str]] = None) -> ProviderConfig:
     values = values or load_env()
+    # If no model in env or settings, don't use a default here unless absolutely necessary
+    model = values.get("NVIDIA_NIM_MODEL", "").strip()
     return ProviderConfig(
         name="NVIDIA_NIM",
         base_url=values.get("NVIDIA_NIM_BASE_URL", DEFAULT_NVIDIA_NIM_BASE_URL).strip().rstrip("/"),
         api_key=_api_value(values),
-        model=values.get("NVIDIA_NIM_MODEL", DEFAULT_NVIDIA_NIM_MODEL).strip(),
+        model=model,
         needs_key=True,
     )
 

@@ -31,7 +31,20 @@ LOG_QUEUE: collections.deque[str] = collections.deque(maxlen=50)
 # Cache for /v1/models to avoid slow network calls.
 _MODELS_CACHE: Dict[str, Any] = {}
 _MODELS_CACHE_TIME: float = 0
-MODELS_CACHE_TTL = 3600  # 1 hour
+MODELS_CACHE_TTL = 3600 * 24 * 7  # 1 week
+
+# Global HTTP client for persistent connections
+_HTTP_CLIENT: Optional[httpx.Client] = None
+
+def get_http_client() -> httpx.Client:
+    global _HTTP_CLIENT
+    if _HTTP_CLIENT is None:
+        _HTTP_CLIENT = httpx.Client(
+            timeout=httpx.Timeout(300.0, connect=10.0),
+            limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
+            http2=True
+        )
+    return _HTTP_CLIENT
 
 # Used only if NVIDIA's /models endpoint is temporarily unavailable. The real
 # /models response is preferred whenever the user's key can access it.
@@ -89,7 +102,7 @@ def call_openai_compatible(provider, body: Dict[str, Any], stream: bool = False)
     url = provider.base_url.rstrip("/") + "/chat/completions"
     headers = provider_headers(provider)
 
-    client = httpx.Client(timeout=httpx.Timeout(300.0, connect=10.0))
+    client = get_http_client()
     if stream:
         return client.stream("POST", url, json=body, headers=headers)
     else:
@@ -147,10 +160,10 @@ def extract_model_ids(data: Any) -> list[str]:
 
 
 def fetch_json(url: str, headers: Optional[Dict[str, str]] = None, timeout: int = 30) -> Any:
-    with httpx.Client(timeout=timeout) as client:
-        resp = client.get(url, headers=headers or {})
-        resp.raise_for_status()
-        return resp.json()
+    client = get_http_client()
+    resp = client.get(url, headers=headers or {}, timeout=timeout)
+    resp.raise_for_status()
+    return resp.json()
 
 
 def list_provider_models(provider) -> tuple[list[str], str]:
@@ -348,10 +361,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/admin/version":
             try:
-                with httpx.Client(timeout=2) as client:
-                    r = client.get("https://api.github.com/repos/Chintanpatel24/my-free-agents/releases/latest", headers={"User-Agent": "Claude-NIM-Proxy"})
-                    data = r.json()
-                    return self._send(200, {"latest": data.get("tag_name", "unknown")})
+                client = get_http_client()
+                r = client.get("https://api.github.com/repos/Chintanpatel24/my-free-agents/releases/latest", headers={"User-Agent": "Claude-NIM-Proxy"}, timeout=2)
+                data = r.json()
+                return self._send(200, {"latest": data.get("tag_name", "unknown")})
             except:
                 return self._send(200, {"latest": "unknown"})
         if path == "/admin/current-model":
@@ -379,9 +392,6 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/admin":
             return self._admin_post()
         if path == "/admin/test":
-            # Start background model fetch if not already in cache
-            import threading
-            threading.Thread(target=self._background_fetch_models, daemon=True).start()
             return self._admin_test()
         if path == "/admin/launch":
             return self._send(200, {"ok": True, "command": "my-claudecode"})
@@ -419,9 +429,12 @@ class Handler(BaseHTTPRequestHandler):
             if is_stream:
                 resp_ctx = call_openai_compatible(provider, upstream, stream=True)
                 with resp_ctx as resp:
+                    conn_time = time.time()
+                    sys.stderr.write(f"  [Time] Connected to NVIDIA in {conn_time - start_time:.2f}s\n")
                     resp.raise_for_status()
                     res = self._pipe_stream(resp, body.get("model") or values.get("ANTHROPIC_MODEL", "my-free-agents"), start_time, upstream_model)
-                    sys.stderr.write(f"  [Response] Stream finished in {time.time() - start_time:.2f}s\n")
+                    end_time = time.time()
+                    sys.stderr.write(f"  [Time] Full stream finished in {end_time - start_time:.2f}s (Total)\n")
                     sys.stderr.flush()
                     return res
             else:
@@ -477,8 +490,14 @@ class Handler(BaseHTTPRequestHandler):
         tool_started: Dict[int, bool] = {}
         tool_ids: Dict[int, str] = {}
 
+        first_byte = True
         for line in resp.iter_lines():
             try:
+                if first_byte:
+                    first_byte = False
+                    sys.stderr.write(f"  [Time] First chunk received in {time.time() - start_time:.2f}s\n")
+                    sys.stderr.flush()
+
                 if not line or not line.startswith("data:"): continue
                 data = line[5:].strip()
                 if not data or data == "[DONE]": continue
@@ -668,15 +687,6 @@ checkVersion(); updateCurrentModel();
 </script></body></html>"""
         return self._send_text(200, html_doc)
 
-    def _background_fetch_models(self):
-        try:
-            values = load_env()
-            provider = get_provider(values)
-            if provider.api_key:
-                list_provider_models(provider)
-        except Exception:
-            pass
-
     def _admin_test(self):
         if not self._is_loopback(): return self._send(403, {"ok": False, "message": "Admin UI is only available from localhost"})
         try:
@@ -685,14 +695,14 @@ checkVersion(); updateCurrentModel();
             api_key = data.get("NVIDIA_NIM_API", "")
             if "…" in api_key: api_key = get_provider(values).api_key
             if not api_key or api_key == "your-api-key": return self._send(200, {"ok": False, "message": "API key is missing"})
-            url = f"{DEFAULT_NVIDIA_NIM_BASE_URL}/models"
-            with httpx.Client(timeout=10) as client:
-                resp = client.get(url, headers={"Authorization": f"Bearer {api_key}"})
-                resp.raise_for_status()
-                models_data = resp.json()
-                available_models = extract_model_ids(models_data)
-                available_models = [m for m in available_models if m and not m.startswith("claude-") and "anthropic" not in m.lower()]
-                return self._send(200, {"ok": True, "models": available_models})
+
+            provider = get_provider(values)
+            # Force refresh cache
+            global _MODELS_CACHE_TIME
+            _MODELS_CACHE_TIME = 0
+            available_models, _ = list_provider_models(provider)
+            available_models = [m for m in available_models if m and not m.startswith("claude-") and "anthropic" not in m.lower()]
+            return self._send(200, {"ok": True, "models": available_models})
         except httpx.HTTPStatusError as e:
             msg = e.response.text
             try:

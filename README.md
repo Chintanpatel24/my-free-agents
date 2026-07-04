@@ -6,8 +6,8 @@
 
 # ***my-free-claudecode***
 - Use **Claude Code** with **NVIDIA NIM** models for free (using your NVIDIA NIM API key). This project provides a local proxy that translates Claude Code requests into NVIDIA NIM API calls.
->[!NOTE]
->Currently this project only uses the `NVIDIA NIM API` only; other providers will be added in the future. 
+>[!IMPORTANT]
+>You must install CloudCode first, and then only should you install this proxy. 
 <div align=center>
 <image src="assets/working-fine.png" alt="claudecode-woring-image">
 </div>
@@ -23,6 +23,8 @@
 
 <a name="Providers"></a>
 ## Providers
+>[!NOTE]
+>Currently this project only uses the `NVIDIA NIM API` only; other providers will be added in the future.
 - [**NVIDIA NIM**](https://build.nvidia.com/explore/discover)
 
 ---

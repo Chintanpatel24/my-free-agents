@@ -221,9 +221,10 @@ def selected_upstream_model(body: Dict[str, Any], provider, values: Dict[str, st
     aliases = {
         "",
         "free-claude-code",
+        "my-free-agents",
         "nim-proxy",
-        values.get("ANTHROPIC_MODEL", "free-claude-code"),
-        values.get("ANTHROPIC_SMALL_FAST_MODEL", "free-claude-code"),
+        values.get("ANTHROPIC_MODEL", "my-free-agents"),
+        values.get("ANTHROPIC_SMALL_FAST_MODEL", "my-free-agents"),
     }
     # If Claude Code sends a built-in Anthropic model name, map it to the
     # configured upstream model. If the user selected a real /v1/models item,
@@ -234,11 +235,12 @@ def selected_upstream_model(body: Dict[str, Any], provider, values: Dict[str, st
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "FreeClaudeCode/1.1"
+    server_version = "MyFreeAgents/1.1"
 
     def log_message(self, fmt, *args):
         msg = "[%s] %s" % (self.log_date_time_string(), fmt % args)
-        sys.stderr.write(msg + "\n")
+        if "HEAD" not in msg: # Keep logs cleaner
+            sys.stderr.write(msg + "\n")
         LOG_QUEUE.append(msg)
 
     def _send(self, status: int, data: Any, headers: Optional[Dict[str, str]] = None):
@@ -288,7 +290,14 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/health"):
             values = load_env()
             provider = get_provider(values)
-            return self._send(200, {"ok": True, "name": "free-claude-code", "provider": provider.name, "model": provider.model})
+            return self._send(200, {"ok": True, "name": "my-free-agents", "provider": provider.name, "model": provider.model})
+        if path in ("/v1/auth/status", "/v1/identify", "/v1/users/current"):
+            return self._send(200, {
+                "id": "user_local_proxy",
+                "email": "proxy@localhost",
+                "account": {"id": "acc_local", "name": "Local Proxy User"},
+                "logged_in": True
+            })
         if path in ("/v1/models", "/models"):
             values = load_env()
             provider = get_provider(values)
@@ -332,7 +341,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"type": "error", "error": {"type": "bad_request", "message": str(e)}})
         if path == "/v1/messages":
             return self._messages()
-        if path == "/v1/auth/status" or path == "/v1/identify":
+        if path in ("/v1/auth/status", "/v1/identify", "/v1/users/current"):
             return self._send(200, {
                 "id": "user_local_proxy",
                 "email": "proxy@localhost",
@@ -345,22 +354,28 @@ class Handler(BaseHTTPRequestHandler):
             return self._admin_test()
         if path == "/admin/launch":
             return self._send(200, {"ok": True, "command": "my-claudecode"})
-        return self._send(404, {"type": "error", "error": {"type": "not_found", "message": path}})
+
+        # If no POST route matches, check if it's a GET route that was sent as POST
+        # some clients might do this incorrectly.
+        return self._send(404, {"type": "error", "error": {"type": "not_found", "message": f"Path not found or method not allowed: {self.command} {path}"}})
 
     def _messages(self):
         start_time = time.time()
         try:
             values = load_env()
             provider = get_provider(values)
+            if not provider.model:
+                return self._send(400, {"type": "error", "error": {"type": "bad_request", "message": "No model selected. Please visit the admin panel at /admin and select an NVIDIA NIM model first."}})
+
             body = self._read_json()
             upstream_model = selected_upstream_model(body, provider, values)
             max_tokens = int(values.get("DEFAULT_MAX_TOKENS", "4096") or "4096")
             upstream = build_openai_request(body, upstream_model, max_tokens)
             resp = call_openai_compatible(provider, upstream)
             if body.get("stream"):
-                return self._pipe_stream(resp, body.get("model") or values.get("ANTHROPIC_MODEL", "free-claude-code"), start_time, upstream_model)
+                return self._pipe_stream(resp, body.get("model") or values.get("ANTHROPIC_MODEL", "my-free-agents"), start_time, upstream_model)
             data = json.loads(resp.read().decode("utf-8"))
-            anthropic_resp = openai_to_anthropic(data, body.get("model") or values.get("ANTHROPIC_MODEL", "free-claude-code"))
+            anthropic_resp = openai_to_anthropic(data, body.get("model") or values.get("ANTHROPIC_MODEL", "my-free-agents"))
             return self._send(200, anthropic_resp)
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "replace")
@@ -406,6 +421,7 @@ class Handler(BaseHTTPRequestHandler):
         for raw in resp:
             try:
                 buffer += raw.decode("utf-8", "replace")
+                buffer = buffer.replace("\r\n", "\n")
                 while "\n\n" in buffer:
                     part, buffer = buffer.split("\n\n", 1)
                     line = next((x for x in part.splitlines() if x.startswith("data:")), "")

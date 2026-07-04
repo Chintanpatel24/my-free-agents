@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "my-free-claudecode"
+name = "my-free-agents"
 version = "1.1.0"
 description = "Installable Python local Anthropic-compatible proxy for Claude Code using NVIDIA NIM."
 readme = "README.md"
@@ -14,7 +14,7 @@ keywords = ["claude-code", "anthropic", "nvidia-nim", "proxy", "python"]
 dependencies = []
 
 [project.scripts]
-my-server-claudecode = "free_claude_code.cli:main_server"
+start-claudecode-server = "free_claude_code.cli:main_server"
 my-claudecode = "free_claude_code.cli:main_claude"
 
 [tool.setuptools]

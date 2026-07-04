@@ -276,9 +276,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS,HEAD")
         self.send_header("Access-Control-Allow-Headers", "content-type,authorization,anthropic-version,anthropic-beta,x-api-key")
         self.end_headers()
+
+    def do_HEAD(self):
+        self.do_GET()
 
     def do_GET(self):
         path = urlparse(self.path).path
@@ -308,7 +311,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/admin/version":
             try:
-                req = urllib.request.Request("https://api.github.com/repos/Chintanpatel24/my-free-claudecode/releases/latest", headers={"User-Agent": "Claude-NIM-Proxy"})
+                req = urllib.request.Request("https://api.github.com/repos/Chintanpatel24/my-free-agents/releases/latest", headers={"User-Agent": "Claude-NIM-Proxy"})
                 with urllib.request.urlopen(req, timeout=2) as r:
                     data = json.loads(r.read().decode("utf-8"))
                     return self._send(200, {"latest": data.get("tag_name", "unknown")})

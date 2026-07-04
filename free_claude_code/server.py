@@ -29,6 +29,11 @@ SENSITIVE_KEYS = ("API", "API_KEY")
 
 LOG_QUEUE: collections.deque[str] = collections.deque(maxlen=50)
 
+# Cache for /v1/models to avoid slow network calls.
+_MODELS_CACHE: Dict[str, Any] = {}
+_MODELS_CACHE_TIME: float = 0
+MODELS_CACHE_TTL = 3600  # 1 hour
+
 # Used only if NVIDIA's /models endpoint is temporarily unavailable. The real
 # /models response is preferred whenever the user's key can access it.
 NVIDIA_FEATURED_MODELS_URL = "https://assets.ngc.nvidia.com/products/api-catalog/featured-models.json"
@@ -82,6 +87,8 @@ def call_openai_compatible(provider, body: Dict[str, Any]):
     validate_provider_ready(provider)
     url = provider.base_url.rstrip("/") + "/chat/completions"
     req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), headers=provider_headers(provider), method="POST")
+    # Reduced timeout for connection to improve perceived speed on failure.
+    # Total timeout remains 300s for long generations.
     return urllib.request.urlopen(req, timeout=300)
 
 
@@ -149,27 +156,40 @@ def list_provider_models(provider) -> tuple[list[str], str]:
     broader NVIDIA catalog instead of only a tiny subset. Claude/Anthropic ids
     are filtered later.
     """
+    global _MODELS_CACHE_TIME, _MODELS_CACHE
+    now = time.time()
+    cache_key = f"{provider.base_url}:{provider.api_key}"
+    if _MODELS_CACHE and cache_key in _MODELS_CACHE and (now - _MODELS_CACHE_TIME) < MODELS_CACHE_TTL:
+        return _MODELS_CACHE[cache_key]
+
     validate_provider_ready(provider)
     ids: list[str] = []
     sources: list[str] = []
 
     # Native authenticated NVIDIA API list.
-    data = fetch_json(provider.base_url.rstrip("/") + "/models", provider_headers(provider, content_type=False), 30)
-    for mid in extract_model_ids(data):
-        _add_model_id(ids, mid)
-    sources.append(f"native /models: {len(ids)}")
+    try:
+        data = fetch_json(provider.base_url.rstrip("/") + "/models", provider_headers(provider, content_type=False), 10)
+        for mid in extract_model_ids(data):
+            _add_model_id(ids, mid)
+        sources.append(f"native /models: {len(ids)}")
+    except Exception as e:
+        sources.append(f"native /models unavailable: {e}")
 
     # Public NVIDIA catalog feed used only to add missing NVIDIA catalog entries.
     try:
         before = len(ids)
-        catalog = fetch_json(NVIDIA_FEATURED_MODELS_URL, {}, 15)
+        catalog = fetch_json(NVIDIA_FEATURED_MODELS_URL, {}, 5)
         for mid in extract_model_ids(catalog):
             _add_model_id(ids, mid)
         sources.append(f"ngc catalog +{len(ids) - before}")
     except Exception as e:
         sources.append(f"ngc catalog unavailable: {e}")
 
-    return ids, ", ".join(sources)
+    res = (ids, ", ".join(sources))
+    if ids:
+        _MODELS_CACHE[cache_key] = res
+        _MODELS_CACHE_TIME = now
+    return res
 
 
 def models_response(provider, values: Dict[str, str]) -> Dict[str, Any]:
@@ -417,48 +437,71 @@ class Handler(BaseHTTPRequestHandler):
         finish = "end_turn"
         text_started = False
         text_index = 0
-        tool_calls: Dict[int, Dict[str, str]] = {}
+        tool_started: Dict[int, bool] = {}
+        tool_ids: Dict[int, str] = {}
+
         for raw in resp:
             try:
-                buffer += raw.decode("utf-8", "replace")
-                buffer = buffer.replace("\r\n", "\n")
-                while "\n\n" in buffer:
-                    part, buffer = buffer.split("\n\n", 1)
+                chunk = raw.decode("utf-8", "replace")
+                if not chunk: continue
+                buffer += chunk
+                if "\n\n" not in buffer: continue
+
+                parts = buffer.split("\n\n")
+                buffer = parts.pop() # Last part is potentially incomplete
+
+                for part in parts:
                     line = next((x for x in part.splitlines() if x.startswith("data:")), "")
                     data = line[5:].strip() if line else ""
                     if not data or data == "[DONE]": continue
                     obj = json.loads(data)
                     choice = (obj.get("choices") or [{}])[0]
                     delta = choice.get("delta") or {}
-                    if choice.get("finish_reason"): finish = "tool_use" if choice.get("finish_reason") == "tool_calls" else "end_turn"
+
+                    if choice.get("finish_reason"):
+                        finish = "tool_use" if choice.get("finish_reason") == "tool_calls" else "end_turn"
+
+                    # Handle Text
                     text = delta.get("content")
                     if text:
                         if not text_started:
                             text_started = True
                             self._sse("content_block_start", {"type": "content_block_start", "index": text_index, "content_block": {"type": "text", "text": ""}})
                         self._sse("content_block_delta", {"type": "content_block_delta", "index": text_index, "delta": {"type": "text_delta", "text": text}})
+
+                    # Handle Tool Calls (Immediate Streaming)
                     for tc in delta.get("tool_calls") or []:
-                        idx = int(tc.get("index", len(tool_calls)))
-                        cur = tool_calls.setdefault(idx, {"id": "", "name": "", "args": ""})
-                        if tc.get("id"): cur["id"] = tc.get("id")
-                        fn = tc.get("function") or {}
-                        if fn.get("name"): cur["name"] += fn.get("name")
-                        if fn.get("arguments"): cur["args"] += fn.get("arguments")
+                        idx = int(tc.get("index", 0))
+
+                        # In Anthropic, each tool call is a separate content block.
+                        # We map OpenAI tool index to Anthropic content block index.
+                        # Usually, index 0 is text (if present).
+                        anthropic_idx = idx + (1 if text_started else 0)
+
+                        if idx not in tool_started:
+                            tool_started[idx] = True
+                            tool_id = tc.get("id") or "toolu_" + uuid.uuid4().hex
+                            tool_ids[idx] = tool_id
+                            name = tc.get("function", {}).get("name") or "tool"
+                            self._sse("content_block_start", {"type": "content_block_start", "index": anthropic_idx, "content_block": {"type": "tool_use", "id": tool_id, "name": name, "input": {}}})
+
+                        args = tc.get("function", {}).get("arguments")
+                        if args:
+                            self._sse("content_block_delta", {"type": "content_block_delta", "index": anthropic_idx, "delta": {"type": "input_json_delta", "partial_json": args}})
+
                         finish = "tool_use"
             except BrokenPipeError: return
             except Exception: continue
-        block_index = 0
+
+        # Stop all blocks
         if text_started:
             self._sse("content_block_stop", {"type": "content_block_stop", "index": text_index})
-            block_index = 1
-        for tc in [tool_calls[k] for k in sorted(tool_calls)]:
-            tool_id = tc.get("id") or "toolu_" + uuid.uuid4().hex
-            self._sse("content_block_start", {"type": "content_block_start", "index": block_index, "content_block": {"type": "tool_use", "id": tool_id, "name": tc.get("name") or "tool", "input": {}}})
-            if tc.get("args"):
-                self._sse("content_block_delta", {"type": "content_block_delta", "index": block_index, "delta": {"type": "input_json_delta", "partial_json": tc.get("args")}})
-            self._sse("content_block_stop", {"type": "content_block_stop", "index": block_index})
-            block_index += 1
-        if not text_started and not tool_calls:
+
+        for idx in sorted(tool_started.keys()):
+            anthropic_idx = idx + (1 if text_started else 0)
+            self._sse("content_block_stop", {"type": "content_block_stop", "index": anthropic_idx})
+
+        if not text_started and not tool_started:
             self._sse("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}})
             self._sse("content_block_stop", {"type": "content_block_stop", "index": 0})
 

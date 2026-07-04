@@ -64,7 +64,7 @@ if (Test-Path $ExistingEnv) {
     }
 }
 
-if ($ExistingApiKey -and $ExistingApiKey -ne "your-api-key") {
+if ($ExistingApiKey -and $ExistingApiKey -ne "your-api-key" -and $ExistingApiKey.Trim() -ne "") {
     Say "Existing API key found. Skipping prompt."
     $UserApiKey = $ExistingApiKey
 } else {

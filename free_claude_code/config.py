@@ -46,7 +46,8 @@ def load_settings() -> Dict[str, str]:
     p = settings_path()
     if p.exists():
         try:
-            return json.loads(p.read_text(encoding="utf-8"))
+            with open(p, "r", encoding="utf-8") as f:
+                return json.load(f)
         except:
             pass
     return {}
@@ -56,7 +57,8 @@ def save_settings(updates: Dict[str, str]) -> None:
     data = load_settings()
     data.update(updates)
     p = settings_path()
-    p.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
 
 
 def parse_env_text(text: str) -> Dict[str, str]:

@@ -16,8 +16,6 @@ ENV_HEADER = """# Managed by My ClaudeCode Server /admin.
 # installs only create NVIDIA_NIM_API.
 DEFAULT_ENV = """# NVIDIA NIM API Key
 NVIDIA_NIM_API=
-# NVIDIA NIM Model
-NVIDIA_NIM_MODEL=
 """
 
 DEFAULT_NVIDIA_NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"
@@ -81,15 +79,17 @@ def _api_value(values: Dict[str, str]) -> str:
 def write_env_values(updates: Dict[str, str]) -> None:
     """Write a minimal user-facing .env.
 
-    NVIDIA_NIM_API, NVIDIA_NIM_MODEL and LAST_MODEL are persisted.
+    NVIDIA_NIM_API is the primary persisted value.
+    NVIDIA_NIM_MODEL is also persisted if the user sets it via UI.
     """
     p = ensure_env()
     old = parse_env_text(p.read_text(encoding="utf-8"))
     old.update({k: v for k, v in updates.items() if k})
     api = _api_value(old)
-    model = old.get("NVIDIA_NIM_MODEL", DEFAULT_NVIDIA_NIM_MODEL)
-    last = old.get("LAST_MODEL", "")
-    content = f"# NVIDIA NIM API Key\nNVIDIA_NIM_API={api}\n# NVIDIA NIM Model\nNVIDIA_NIM_MODEL={model}\n# Last Used Model\nLAST_MODEL={last}\n"
+    model = old.get("NVIDIA_NIM_MODEL", "")
+    content = f"# NVIDIA NIM API Key\nNVIDIA_NIM_API={api}\n"
+    if model:
+        content += f"# NVIDIA NIM Model\nNVIDIA_NIM_MODEL={model}\n"
     p.write_text(content, encoding="utf-8")
     try:
         p.chmod(stat.S_IRUSR | stat.S_IWUSR)

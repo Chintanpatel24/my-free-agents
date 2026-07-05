@@ -8,10 +8,9 @@ if (-not $RepoUrl) { $RepoUrl = 'https://github.com/Chintanpatel24/my-free-agent
 
 function Step($Message) { Write-Host "[my-free-agents] $Message" -ForegroundColor Cyan }
 function Done($Message) { Write-Host "[ok] $Message" -ForegroundColor Green }
-function Warn($Message) { Write-Host "[warn] $Message" -ForegroundColor Yellow }
 function Fail($Message) { Write-Host "[error] $Message" -ForegroundColor Red; exit 1 }
 
-Step "Installing My Free Agents for Claude Code"
+Step "Updating My Free Agents for Claude Code"
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $LocalInstaller = if ($ScriptDir) { Join-Path $ScriptDir 'scripts\install.ps1' } else { $null }
@@ -23,7 +22,7 @@ if ($LocalInstaller -and (Test-Path $LocalInstaller) -and (Test-Path (Join-Path 
 }
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-  Fail "git is required for remote install. Install Git, then run this command again."
+  Fail "git is required for update. Install Git, then run this command again."
 }
 
 $Tmp = Join-Path ([IO.Path]::GetTempPath()) ('my-free-agents-' + [guid]::NewGuid().ToString('N'))
@@ -35,10 +34,10 @@ try {
   git clone --depth 1 --branch $Branch $RepoUrl $RepoDir
   if ($LASTEXITCODE -ne 0) { Fail "git clone failed with exit code $LASTEXITCODE" }
 
-  Step "Running installer"
+  Step "Running updater"
   & (Join-Path $RepoDir 'scripts\install.ps1') @args
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-  Done "Install finished"
+  Done "Update finished"
 } catch {
   Fail $_.Exception.Message
 } finally {

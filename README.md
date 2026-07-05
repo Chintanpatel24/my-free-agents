@@ -121,8 +121,6 @@ Useful optional settings:
 - `NVIDIA_NIM_RETRIES=2` retries short non-streaming upstream failures.
 - `NVIDIA_NIM_STREAM_RETRIES=1` retries a stream only before any response bytes are sent.
 - `NVIDIA_NIM_INCLUDE_PUBLIC_CATALOG=1` adds NVIDIA's public catalog to `/models`; disabled by default for faster startup and model refresh.
-- `NVIDIA_NIM_FAST_MODEL=meta/llama-3.1-8b-instruct` is used for Claude Code's small/fast model calls.
-- `FREE_AGENTS_FAST_MAX_TOKENS=1536` caps large Claude Code output requests in fast mode.
 - `FREE_AGENTS_LOCAL_GREETINGS=1` replies locally to tiny greetings like `hi`, so the quick health-check prompt answers instantly.
 
-Fast mode is enabled by default. Streaming responses send the Anthropic `message_start` event immediately, before waiting for NVIDIA, so Claude Code should not look frozen while the upstream model is warming up.
+Streaming responses send the Anthropic `message_start` event immediately, before waiting for NVIDIA, so Claude Code should not look frozen while the upstream model is warming up.

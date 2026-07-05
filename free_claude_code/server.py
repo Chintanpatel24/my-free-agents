@@ -18,7 +18,6 @@ from .anthropic import build_openai_request, estimate_tokens, openai_to_anthropi
 from .config import (
     DEFAULT_HOST,
     DEFAULT_NVIDIA_NIM_BASE_URL,
-    DEFAULT_NVIDIA_NIM_FAST_MODEL,
     DEFAULT_NVIDIA_NIM_MODEL,
     DEFAULT_PORT,
     get_provider,
@@ -35,9 +34,9 @@ LAST_FIRST_BYTE: Dict[str, float] = {"value": 0.0}
 # Global HTTPX clients for connection pooling. NVIDIA's endpoint is fast over
 # HTTP/1.1 and some local Python/http2 combinations stall for a long time, so
 # HTTP/1.1 is the safe default. Set NVIDIA_NIM_HTTP2=1 to opt in.
-CLIENT_TIMEOUT = httpx.Timeout(connect=10.0, read=180.0, write=30.0, pool=10.0)
-STREAM_TIMEOUT = httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=10.0)
-FAST_TIMEOUT = httpx.Timeout(connect=5.0, read=10.0, write=10.0, pool=5.0)
+CLIENT_TIMEOUT = httpx.Timeout(connect=5.0, read=180.0, write=30.0, pool=10.0)
+STREAM_TIMEOUT = httpx.Timeout(connect=5.0, read=300.0, write=30.0, pool=10.0)
+FAST_TIMEOUT = httpx.Timeout(connect=3.0, read=10.0, write=10.0, pool=5.0)
 HTTP_CLIENTS: Dict[bool, Optional[httpx.Client]] = {False: None, True: None}
 RETRYABLE_HTTP_STATUS = {408, 409, 425, 429, 500, 502, 503, 504}
 RETRYABLE_EXC = (
@@ -120,7 +119,8 @@ def http_client(values: Optional[Dict[str, str]] = None) -> httpx.Client:
             HTTP_CLIENTS[use_http2] = httpx.Client(
                 http2=use_http2,
                 timeout=CLIENT_TIMEOUT,
-                limits=httpx.Limits(max_connections=50, max_keepalive_connections=20, keepalive_expiry=60.0),
+                follow_redirects=True,
+                limits=httpx.Limits(max_connections=100, max_keepalive_connections=50, keepalive_expiry=120.0),
             )
         except ImportError:
             sys.stderr.write("[http] HTTP/2 requested but h2 is not installed; falling back to HTTP/1.1\n")
@@ -129,7 +129,8 @@ def http_client(values: Optional[Dict[str, str]] = None) -> httpx.Client:
                 HTTP_CLIENTS[False] = httpx.Client(
                     http2=False,
                     timeout=CLIENT_TIMEOUT,
-                    limits=httpx.Limits(max_connections=50, max_keepalive_connections=20, keepalive_expiry=60.0),
+                    follow_redirects=True,
+                    limits=httpx.Limits(max_connections=100, max_keepalive_connections=50, keepalive_expiry=120.0),
                 )
     return HTTP_CLIENTS[use_http2]
 
@@ -350,10 +351,6 @@ def _format_models_response(ordered: list[str], selected_model: str, source: Opt
 
 def selected_upstream_model(body: Dict[str, Any], provider, values: Dict[str, str]) -> str:
     requested = str(body.get("model") or "").strip()
-    fast_model = values.get("NVIDIA_NIM_FAST_MODEL", DEFAULT_NVIDIA_NIM_FAST_MODEL).strip() or DEFAULT_NVIDIA_NIM_FAST_MODEL
-    small_alias = values.get("ANTHROPIC_SMALL_FAST_MODEL", "").strip()
-    if fast_model and ((small_alias and requested == small_alias) or "haiku" in requested.lower() or "small_fast" in requested.lower()):
-        return fast_model
     aliases = {
         "",
         "free-claude-code",
@@ -394,7 +391,11 @@ def is_local_fast_greeting(body: Dict[str, Any], values: Dict[str, str]) -> bool
     if isinstance(choice, dict) and choice.get("type") in ("any", "tool"):
         return False
     text = last_user_text(body).lower().strip(" \t\r\n.!?")
-    return text in {"hi", "hello", "hey", "yo", "hii", "hiii"}
+    greetings = {
+        "hi", "hello", "hey", "yo", "hii", "hiii", "hola", "greetings",
+        "how are you", "how are you?", "who are you", "who are you?"
+    }
+    return text in greetings
 
 
 def local_text_response(text: str, request_model: str) -> Dict[str, Any]:
@@ -410,16 +411,8 @@ def local_text_response(text: str, request_model: str) -> Dict[str, Any]:
     }
 
 
-def prepare_upstream_body(body: Dict[str, Any], values: Dict[str, str]) -> Dict[str, Any]:
-    prepared = dict(body)
-    if env_bool(values, "FREE_AGENTS_FAST_MODE", True):
-        requested = env_int(values, "DEFAULT_MAX_TOKENS", 4096)
-        if prepared.get("max_tokens") is not None:
-            requested = env_int({"value": prepared.get("max_tokens")}, "value", requested)
-        cap = env_int(values, "FREE_AGENTS_FAST_MAX_TOKENS", 1536)
-        if cap > 0:
-            prepared["max_tokens"] = min(max(1, requested), cap)
-    return prepared
+def prepare_upstream_body(body: Dict[str, Any], _values: Dict[str, str]) -> Dict[str, Any]:
+    return dict(body)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -749,8 +742,6 @@ class Handler(BaseHTTPRequestHandler):
         provider = get_provider(values)
         api_value = provider.api_key or ""
         current_model = provider.model
-        current_fast_model = values.get("NVIDIA_NIM_FAST_MODEL", DEFAULT_NVIDIA_NIM_FAST_MODEL)
-        fast_max_tokens = str(env_int(values, "FREE_AGENTS_FAST_MAX_TOKENS", 1536))
         local_greetings_checked = " checked" if env_bool(values, "FREE_AGENTS_LOCAL_GREETINGS", True) else ""
         last_model = values.get("LAST_MODEL", "")
 
@@ -812,9 +803,7 @@ class Handler(BaseHTTPRequestHandler):
 <section>
   <h3>NVIDIA NIM Settings</h3>
   <label>NVIDIA_NIM_API<input name="NVIDIA_NIM_API" value="{html.escape(mask(api_value))}" placeholder="your-api-key"></label>
-  <label>Default Model (NVIDIA_NIM_MODEL)<br><select name="NVIDIA_NIM_MODEL">{options}</select></label>
-  <label>Fast Model (NVIDIA_NIM_FAST_MODEL)<input name="NVIDIA_NIM_FAST_MODEL" value="{html.escape(current_fast_model)}" placeholder="{html.escape(DEFAULT_NVIDIA_NIM_FAST_MODEL)}"></label>
-  <label>Fast Max Tokens (FREE_AGENTS_FAST_MAX_TOKENS)<input name="FREE_AGENTS_FAST_MAX_TOKENS" value="{html.escape(fast_max_tokens)}" placeholder="1536"></label>
+  <label>Selected Model (NVIDIA_NIM_MODEL)<br><select name="NVIDIA_NIM_MODEL">{options}</select></label>
   <label style="display:flex;gap:.5rem;align-items:center;margin-bottom:1.5rem;"><input type="checkbox" name="FREE_AGENTS_LOCAL_GREETINGS" value="1"{local_greetings_checked} style="width:auto;margin:0;"> Instant local reply for tiny greetings</label>
   {last_model_html}
   <div style="display:flex;">
@@ -951,7 +940,7 @@ updateLogs();
         n = int(self.headers.get("Content-Length", "0") or "0")
         form = parse_qs(self.rfile.read(n).decode("utf-8"), keep_blank_values=True)
         updates: Dict[str, str] = {}
-        allowed = {"NVIDIA_NIM_API", "NVIDIA_NIM_MODEL", "NVIDIA_NIM_FAST_MODEL", "FREE_AGENTS_FAST_MAX_TOKENS", "FREE_AGENTS_LOCAL_GREETINGS"}
+        allowed = {"NVIDIA_NIM_API", "NVIDIA_NIM_MODEL", "FREE_AGENTS_LOCAL_GREETINGS"}
         for k, v in form.items():
             if k not in allowed:
                 continue

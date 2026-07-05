@@ -15,6 +15,34 @@ try { $version = & $Python -c "import sys; print('.'.join(map(str, sys.version_i
 $majorMinor = & $Python -c "import sys; print(1 if sys.version_info >= (3,10) else 0)"
 if ($majorMinor.Trim() -ne '1') { Fail "Python 3.10+ is required. Found $version" }
 
+# Check for Claude Code
+if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+    Warn "Claude Code CLI ('claude' command) not found. Please install it first for the best experience."
+    Warn "You can install it with: npm install -g @anthropic-ai/claude-code"
+    $ContinueInstall = Read-Host "`nDo you want to continue anyway? (y/N)"
+    if ($ContinueInstall -notmatch "^[Yy]$") {
+        Say "Installation cancelled."
+        exit 0
+    }
+}
+
+# Check for httpx and http2
+Say "Checking for high-performance dependencies (httpx, http2)..."
+$HasDeps = & $Python -c "import httpx; import h2; print(1)" 2>$null
+if ($HasDeps.Trim() -ne '1') {
+    Warn "Missing httpx or http2 support for Python. These are required for fast performance."
+    $InstallDeps = Read-Host "`nWould you like to install them now? (y/N)"
+    if ($InstallDeps -match "^[Yy]$") {
+        try {
+            & $Python -m pip install "httpx[http2]"
+        } catch {
+            Warn "Failed to install dependencies automatically. Please run: $Python -m pip install 'httpx[http2]'"
+        }
+    } else {
+        Warn "Skipping dependency installation. Note that the server may not work correctly without them."
+    }
+}
+
 # Migration logic
 if ((Test-Path $OldInstallDir) -and -not (Test-Path $InstallDir)) {
     Say "Migrating existing installation from $OldInstallDir to $InstallDir..."
@@ -86,7 +114,7 @@ if ($ExistingApiKey -and $ExistingApiKey -ne "your-api-key") {
     if ($null -eq (Get-Variable Host -ErrorAction SilentlyContinue)) {
         $UserApiKey = [Console]::ReadLine()
     } else {
-        $UserApiKey = Read-Host "`nPlease enter your NVIDIA NIM API key"
+        $UserApiKey = Read-Host "`nPlease enter your NVIDIA NIM API key (Press Enter to skip and do it manually later)"
     }
 }
 

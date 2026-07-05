@@ -6,9 +6,8 @@ import json
 import sys
 import time
 import socket
-import urllib.error
-import urllib.request
 import uuid
+import httpx
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, Iterable, Optional
@@ -28,6 +27,22 @@ from .config import (
 SENSITIVE_KEYS = ("API", "API_KEY")
 
 LOG_QUEUE: collections.deque[str] = collections.deque(maxlen=50)
+LAST_LATENCY: Dict[str, float] = {"value": 0.0}
+
+# Global HTTPX client for connection pooling and HTTP/2 support.
+# Max 20 connections, keepalive 30s.
+HTTP_CLIENT = httpx.Client(
+    http2=True,
+    timeout=httpx.Timeout(300.0, connect=60.0),
+    limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+)
+
+# Model list cache
+MODEL_CACHE: Dict[str, Any] = {
+    "items": [],
+    "expires_at": 0,
+}
+MODEL_CACHE_TTL = 3600  # 1 hour
 
 # Used only if NVIDIA's /models endpoint is temporarily unavailable. The real
 # /models response is preferred whenever the user's key can access it.
@@ -81,8 +96,11 @@ def validate_provider_ready(provider):
 def call_openai_compatible(provider, body: Dict[str, Any]):
     validate_provider_ready(provider)
     url = provider.base_url.rstrip("/") + "/chat/completions"
-    req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), headers=provider_headers(provider), method="POST")
-    return urllib.request.urlopen(req, timeout=300)
+
+    if body.get("stream"):
+        return HTTP_CLIENT.stream("POST", url, json=body, headers=provider_headers(provider))
+    else:
+        return HTTP_CLIENT.post(url, json=body, headers=provider_headers(provider))
 
 
 def _looks_like_model_id(value: str) -> bool:
@@ -136,9 +154,9 @@ def extract_model_ids(data: Any) -> list[str]:
 
 
 def fetch_json(url: str, headers: Optional[Dict[str, str]] = None, timeout: int = 30) -> Any:
-    req = urllib.request.Request(url, headers=headers or {}, method="GET")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    resp = HTTP_CLIENT.get(url, headers=headers or {}, timeout=timeout)
+    resp.raise_for_status()
+    return resp.json()
 
 
 def list_provider_models(provider) -> tuple[list[str], str]:
@@ -173,11 +191,23 @@ def list_provider_models(provider) -> tuple[list[str], str]:
 
 
 def models_response(provider, values: Dict[str, str]) -> Dict[str, Any]:
+    global MODEL_CACHE
+    now = time.time()
+
+    # Return cached models if valid
+    if MODEL_CACHE["items"] and MODEL_CACHE["expires_at"] > now:
+        sys.stderr.write(f"[models] returning {len(MODEL_CACHE['items'])} cached NVIDIA models\n")
+        return _format_models_response(MODEL_CACHE["items"], provider.model)
+
     source = "nvidia-api"
     try:
         # Preferred path: show ALL model ids returned by NVIDIA's native /models
         # endpoint for this key, plus NVIDIA's public catalog entries.
         ordered, source = list_provider_models(provider)
+
+        # Update cache
+        MODEL_CACHE["items"] = ordered
+        MODEL_CACHE["expires_at"] = now + MODEL_CACHE_TTL
     except Exception as e:
         # Fallback path: still never show Anthropic models. This prevents Claude
         # Code from falling back to its built-in Anthropic list when NVIDIA's
@@ -192,14 +222,23 @@ def models_response(provider, values: Dict[str, str]) -> Dict[str, Any]:
     # Last safety filter: never return Anthropic/Claude ids from this proxy.
     ordered = [m for m in ordered if m and not m.startswith("claude-") and "anthropic" not in m.lower()]
 
-    # Ensure the selected model is at the top of the list.
-    if provider.model in ordered:
-        ordered.remove(provider.model)
-        ordered.insert(0, provider.model)
-    elif provider.model:
-        ordered.insert(0, provider.model)
+    return _format_models_response(ordered, provider.model, source)
 
-    sys.stderr.write(f"[models] returning {len(ordered)} NVIDIA models from {source}\n")
+
+def _format_models_response(ordered: list[str], selected_model: str, source: Optional[str] = None) -> Dict[str, Any]:
+    # Last safety filter: never return Anthropic/Claude ids from this proxy.
+    ordered = [m for m in ordered if m and not m.startswith("claude-") and "anthropic" not in m.lower()]
+
+    # Ensure the selected model is at the top of the list.
+    if selected_model in ordered:
+        ordered.remove(selected_model)
+        ordered.insert(0, selected_model)
+    elif selected_model:
+        ordered.insert(0, selected_model)
+
+    if source:
+        sys.stderr.write(f"[models] returning {len(ordered)} NVIDIA models from {source}\n")
+
     items = [{
         "id": mid,
         "type": "model",
@@ -287,6 +326,12 @@ class Handler(BaseHTTPRequestHandler):
             provider = get_provider(values)
             return self._send(200, {"ok": True, "name": "free-claude-code", "provider": provider.name, "model": provider.model})
         if path in ("/v1/models", "/models"):
+            # Check for no-cache header to force refresh
+            cache_control = self.headers.get("Cache-Control", "")
+            if "no-cache" in cache_control:
+                global MODEL_CACHE
+                MODEL_CACHE["expires_at"] = 0
+
             values = load_env()
             provider = get_provider(values)
             try:
@@ -296,7 +341,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/admin":
             return self._admin_get()
         if path == "/admin/logs":
-            return self._send(200, {"logs": list(LOG_QUEUE)})
+            return self._send(200, {"logs": list(LOG_QUEUE), "latency": LAST_LATENCY.get("value", 0.0)})
         return self._send(404, {"type": "error", "error": {"type": "not_found", "message": path}})
 
     def do_POST(self):
@@ -316,6 +361,8 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {"type": "error", "error": {"type": "not_found", "message": path}})
 
     def _messages(self):
+        start_time = time.time()
+        upstream_model = "unknown"
         try:
             values = load_env()
             provider = get_provider(values)
@@ -323,28 +370,40 @@ class Handler(BaseHTTPRequestHandler):
             max_tokens = int(values.get("DEFAULT_MAX_TOKENS", "4096") or "4096")
             upstream_model = selected_upstream_model(body, provider, values)
             upstream = build_openai_request(body, upstream_model, max_tokens)
-            resp = call_openai_compatible(provider, upstream)
+
             if body.get("stream"):
-                return self._pipe_stream(resp, body.get("model") or values.get("ANTHROPIC_MODEL", "free-claude-code"))
-            data = json.loads(resp.read().decode("utf-8"))
+                with call_openai_compatible(provider, upstream) as resp:
+                    resp.raise_for_status()
+                    self._pipe_stream(resp, body.get("model") or values.get("ANTHROPIC_MODEL", "free-claude-code"), start_time)
+                return
+
+            resp = call_openai_compatible(provider, upstream)
+            resp.raise_for_status()
+            data = resp.json()
+
+            latency = time.time() - start_time
+            LAST_LATENCY["value"] = latency
+            self.log_message("Request completed in %.2fs", latency)
+
             return self._send(200, openai_to_anthropic(data, body.get("model") or values.get("ANTHROPIC_MODEL", "free-claude-code")))
-        except urllib.error.HTTPError as e:
-            detail = e.read().decode("utf-8", "replace")
+        except httpx.HTTPStatusError as e:
+            detail = e.response.text
             try:
                 # Try to extract a cleaner message from JSON if possible
-                err_obj = json.loads(detail)
+                err_obj = e.response.json()
                 if "detail" in err_obj:
                     detail = err_obj["detail"]
                 elif "error" in err_obj and "message" in err_obj["error"]:
                     detail = err_obj["error"]["message"]
             except:
                 pass
-            msg = f"NVIDIA NIM Error ({e.code}): {detail}"
-            if e.code == 401:
+            code = e.response.status_code
+            msg = f"NVIDIA NIM Error ({code}): {detail}"
+            if code == 401:
                 msg = "NVIDIA NIM API Key is invalid or expired (401 Unauthorized). Please check your settings in the Admin UI."
-            elif e.code == 404:
+            elif code == 404:
                 msg = f"Model '{upstream_model}' not found or not accessible with your API key (404 Not Found)."
-            return self._send(e.code, {"type": "error", "error": {"type": "upstream_error", "message": msg[:4000]}})
+            return self._send(code, {"type": "error", "error": {"type": "upstream_error", "message": msg[:4000]}})
         except Exception as e:
             return self._send(500, {"type": "error", "error": {"type": "proxy_error", "message": str(e)}})
 
@@ -358,7 +417,7 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
             return False
 
-    def _pipe_stream(self, resp, request_model: str):
+    def _pipe_stream(self, resp, request_model: str, start_time: float):
         try:
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -372,42 +431,46 @@ class Handler(BaseHTTPRequestHandler):
         mid = "msg_" + uuid.uuid4().hex
         if not self._sse("message_start", {"type": "message_start", "message": {"id": mid, "type": "message", "role": "assistant", "model": request_model, "content": [], "stop_reason": None, "stop_sequence": None, "usage": {"input_tokens": 0, "output_tokens": 0}}}):
             return
-        buffer = ""
         finish = "end_turn"
         text_started = False
         text_index = 0
         tool_calls: Dict[int, Dict[str, str]] = {}
-        for raw in resp:
+        first_byte = True
+
+        for line in resp.iter_lines():
             try:
-                buffer += raw.decode("utf-8", "replace")
-                while "\n\n" in buffer:
-                    part, buffer = buffer.split("\n\n", 1)
-                    line = next((x for x in part.splitlines() if x.startswith("data:")), "")
-                    data = line[5:].strip() if line else ""
-                    if not data or data == "[DONE]":
-                        continue
-                    obj = json.loads(data)
-                    choice = (obj.get("choices") or [{}])[0]
-                    delta = choice.get("delta") or {}
-                    if choice.get("finish_reason"):
-                        finish = "tool_use" if choice.get("finish_reason") == "tool_calls" else "end_turn"
-                    text = delta.get("content")
-                    if text:
-                        if not text_started:
-                            text_started = True
-                            self._sse("content_block_start", {"type": "content_block_start", "index": text_index, "content_block": {"type": "text", "text": ""}})
-                        self._sse("content_block_delta", {"type": "content_block_delta", "index": text_index, "delta": {"type": "text_delta", "text": text}})
-                    for tc in delta.get("tool_calls") or []:
-                        idx = int(tc.get("index", len(tool_calls)))
-                        cur = tool_calls.setdefault(idx, {"id": "", "name": "", "args": ""})
-                        if tc.get("id"):
-                            cur["id"] = tc.get("id")
-                        fn = tc.get("function") or {}
-                        if fn.get("name"):
-                            cur["name"] += fn.get("name")
-                        if fn.get("arguments"):
-                            cur["args"] += fn.get("arguments")
-                        finish = "tool_use"
+                if not line or not line.startswith("data:"):
+                    continue
+                if first_byte:
+                    self.log_message("First stream byte received in %.2fs", time.time() - start_time)
+                    first_byte = False
+
+                data = line[5:].strip()
+                if not data or data == "[DONE]":
+                    continue
+
+                obj = json.loads(data)
+                choice = (obj.get("choices") or [{}])[0]
+                delta = choice.get("delta") or {}
+                if choice.get("finish_reason"):
+                    finish = "tool_use" if choice.get("finish_reason") == "tool_calls" else "end_turn"
+                text = delta.get("content")
+                if text:
+                    if not text_started:
+                        text_started = True
+                        self._sse("content_block_start", {"type": "content_block_start", "index": text_index, "content_block": {"type": "text", "text": ""}})
+                    self._sse("content_block_delta", {"type": "content_block_delta", "index": text_index, "delta": {"type": "text_delta", "text": text}})
+                for tc in delta.get("tool_calls") or []:
+                    idx = int(tc.get("index", len(tool_calls)))
+                    cur = tool_calls.setdefault(idx, {"id": "", "name": "", "args": ""})
+                    if tc.get("id"):
+                        cur["id"] = tc.get("id")
+                    fn = tc.get("function") or {}
+                    if fn.get("name"):
+                        cur["name"] += fn.get("name")
+                    if fn.get("arguments"):
+                        cur["args"] += fn.get("arguments")
+                    finish = "tool_use"
             except BrokenPipeError:
                 return
             except Exception:
@@ -428,6 +491,11 @@ class Handler(BaseHTTPRequestHandler):
             self._sse("content_block_stop", {"type": "content_block_stop", "index": 0})
         self._sse("message_delta", {"type": "message_delta", "delta": {"stop_reason": finish, "stop_sequence": None}, "usage": {"output_tokens": 0}})
         self._sse("message_stop", {"type": "message_stop"})
+
+        latency = time.time() - start_time
+        LAST_LATENCY["value"] = latency
+        self.log_message("Stream completed in %.2fs", latency)
+
         self.close_connection = True
 
     def _is_loopback(self) -> bool:
@@ -457,6 +525,9 @@ class Handler(BaseHTTPRequestHandler):
 
         options = "".join(f'<option value="{html.escape(m)}"{ " selected" if m == current_model else ""}>{html.escape(m)}</option>' for m in models)
 
+        latency_val = LAST_LATENCY.get("value", 0.0)
+        latency_html = f"<p>Last request latency: <strong id='latencyVal'>{latency_val:.2f}s</strong></p>" if latency_val > 0 else "<p>Last request latency: <strong id='latencyVal'>N/A</strong></p>"
+
         last_model_html = ""
         if last_model and last_model != current_model:
             last_model_html = f"<h3>Last Used Model</h3><div style='margin-bottom:1rem;'><button type='button' style='padding:0.4rem 0.8rem;font-size:0.8rem;' onclick='document.getElementsByName(\"NVIDIA_NIM_MODEL\")[0].value=\"{html.escape(last_model)}\"'>{html.escape(last_model)}</button></div>"
@@ -482,6 +553,14 @@ class Handler(BaseHTTPRequestHandler):
 </style></head><body>
 <h1>My ClaudeCode Admin Panel</h1>
 <p>NVIDIA NIM proxy configuration and monitoring.</p>
+
+<section>
+  <h3>Performance Status</h3>
+  {latency_html}
+  <p>HTTP/2 Support: <strong>Enabled</strong></p>
+  <p>Connection Pooling: <strong>Active</strong></p>
+  <button type="button" class="secondary" style="margin-left:0;" onclick="refreshModels()">Refresh Model List</button>
+</section>
 
 <form id="configForm" method="post">
 <section>
@@ -540,14 +619,35 @@ async function testConnection() {{
   }}
 }}
 
+async function refreshModels() {{
+  const btn = event.target;
+  const oldText = btn.textContent;
+  btn.textContent = 'Refreshing...';
+  btn.disabled = true;
+  try {{
+    await fetch('/v1/models', {{ headers: {{ 'Cache-Control': 'no-cache' }} }});
+    location.reload();
+  }} catch (e) {{
+    alert('Failed to refresh models: ' + e.message);
+  }} finally {{
+    btn.textContent = oldText;
+    btn.disabled = false;
+  }}
+}}
+
 async function updateLogs() {{
   try {{
     const resp = await fetch('/admin/logs');
     const data = await resp.json();
+
     const viewer = document.getElementById('logViewer');
     const atBottom = viewer.scrollHeight - viewer.scrollTop <= viewer.clientHeight + 10;
     viewer.textContent = data.logs.join('\\n');
     if (atBottom) viewer.scrollTop = viewer.scrollHeight;
+
+    if (data.latency > 0) {{
+      document.getElementById('latencyVal').textContent = data.latency.toFixed(2) + 's';
+    }}
   }} catch (e) {{}}
 }}
 
@@ -575,19 +675,18 @@ updateLogs();
 
             # Simple test: call /models
             url = f"{DEFAULT_NVIDIA_NIM_BASE_URL}/models"
-            req = urllib.request.Request(url, headers={"Authorization": f"Bearer {api_key}"}, method="GET")
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                models_data = json.loads(resp.read().decode("utf-8"))
-                available_models = extract_model_ids(models_data)
-                if model in available_models:
-                    return self._send(200, {"ok": True})
-                else:
-                    return self._send(200, {"ok": False, "message": f"Model '{model}' not found in your account's available models."})
-        except urllib.error.HTTPError as e:
-            msg = str(e)
+            resp = HTTP_CLIENT.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=10)
+            resp.raise_for_status()
+            models_data = resp.json()
+            available_models = extract_model_ids(models_data)
+            if model in available_models:
+                return self._send(200, {"ok": True})
+            else:
+                return self._send(200, {"ok": False, "message": f"Model '{model}' not found in your account's available models."})
+        except httpx.HTTPStatusError as e:
+            msg = e.response.text
             try:
-                msg = e.read().decode("utf-8")
-                err_data = json.loads(msg)
+                err_data = e.response.json()
                 if "detail" in err_data: msg = err_data["detail"]
             except: pass
             return self._send(200, {"ok": False, "message": f"NVIDIA API Error: {msg}"})
@@ -616,6 +715,10 @@ updateLogs();
             old_model = values.get("NVIDIA_NIM_MODEL", "")
             if old_model and old_model != updates["NVIDIA_NIM_MODEL"]:
                 updates["LAST_MODEL"] = old_model
+
+        # Clear model cache on settings change
+        global MODEL_CACHE
+        MODEL_CACHE["expires_at"] = 0
 
         write_env_values(updates)
         self.send_response(303)

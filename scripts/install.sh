@@ -13,6 +13,32 @@ warn(){ printf '\033[1;33m%s\033[0m\n' "$*"; }
 err(){ printf '\033[1;31m%s\033[0m\n' "$*" >&2; }
 
 command -v "$PYTHON_BIN" >/dev/null 2>&1 || { err "Python 3.10+ is required."; exit 1; }
+
+# Check for Claude Code
+if ! command -v claude >/dev/null 2>&1; then
+    warn "Claude Code CLI ('claude' command) not found. Please install it first for the best experience."
+    warn "You can install it with: npm install -g @anthropic-ai/claude-code"
+    printf '\033[1;34m%s\033[0m ' "Do you want to continue anyway? (y/N):"
+    read -r CONTINUE_INSTALL < /dev/tty
+    if [[ ! "$CONTINUE_INSTALL" =~ ^[Yy]$ ]]; then
+        say "Installation cancelled."
+        exit 0
+    fi
+fi
+
+# Check for httpx and http2
+say "Checking for high-performance dependencies (httpx, http2)..."
+if ! "$PYTHON_BIN" -c "import httpx; import h2" >/dev/null 2>&1; then
+    warn "Missing httpx or http2 support for Python. These are required for fast performance."
+    printf '\033[1;34m%s\033[0m ' "Would you like to install them now? (y/N):"
+    read -r INSTALL_DEPS < /dev/tty
+    if [[ "$INSTALL_DEPS" =~ ^[Yy]$ ]]; then
+        "$PYTHON_BIN" -m pip install "httpx[http2]" || warn "Failed to install dependencies automatically. Please run: $PYTHON_BIN -m pip install 'httpx[http2]'"
+    else
+        warn "Skipping dependency installation. Note that the server may not work correctly without them."
+    fi
+fi
+
 "$PYTHON_BIN" - <<'PY' || exit 1
 import sys
 if sys.version_info < (3, 10):
@@ -99,14 +125,14 @@ fi
 
 if [[ -n "$EXISTING_API_KEY" && "$EXISTING_API_KEY" != "your-api-key" && -z "${EXISTING_API_KEY// }" ]]; then
     # Prompt for API Key (read from /dev/tty to support piped installation)
-    printf '\n\033[1;34m%s\033[0m ' "Please enter your NVIDIA NIM API key:"
+    printf '\n\033[1;34m%s\033[0m ' "Please enter your NVIDIA NIM API key (Press Enter to skip and do it manually later):"
     read -r USER_API_KEY < /dev/tty
 elif [[ -n "$EXISTING_API_KEY" && "$EXISTING_API_KEY" != "your-api-key" ]]; then
     say "Existing API key found. Skipping prompt."
     USER_API_KEY="$EXISTING_API_KEY"
 else
     # Prompt for API Key (read from /dev/tty to support piped installation)
-    printf '\n\033[1;34m%s\033[0m ' "Please enter your NVIDIA NIM API key:"
+    printf '\n\033[1;34m%s\033[0m ' "Please enter your NVIDIA NIM API key (Press Enter to skip and do it manually later):"
     read -r USER_API_KEY < /dev/tty
 fi
 

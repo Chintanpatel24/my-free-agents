@@ -7,7 +7,6 @@
 # ***my-free-agents***
 - Use **Claude Code** with **NVIDIA NIM** models for free (using your NVIDIA NIM API key). This project provides a local proxy that translates Claude Code requests into NVIDIA NIM API calls.
 >[!IMPORTANT]
->- Version `1.0.1` get too late responce , so use version `1.0.0` or install it from the dev branch. (which is in working condation)(by changinf the url with the new repo name)<br>
 >- You must install CloudCode first, and then only should you install this proxy.
 <div align=center>
 <image src="assets/working-fine.png" alt="claudecode-woring-image">
@@ -78,6 +77,7 @@ irm https://raw.githubusercontent.com/Chintanpatel24/my-free-agents/main/update.
    ```bash
    start-claudecode-server
    ```
+   The server uses a fast NVIDIA NIM default model (`meta/llama-3.1-8b-instruct`) so Claude Code can start immediately. You can change it any time in the Admin UI.
 2. **Launch Claude Code**:
    In a new terminal window, run:
    ```bash
@@ -107,3 +107,17 @@ If you need to change your API key later, you can:
   ```bash
   start-claudecode-server --set-key your-nvapi-key
   ```
+
+### Performance options
+
+The proxy uses HTTP/1.1 by default because it is the most reliable path for NVIDIA NIM from local Python installs. HTTP/2 is still available if your environment handles it well:
+
+```bash
+NVIDIA_NIM_HTTP2=1 start-claudecode-server
+```
+
+Useful optional settings:
+
+- `NVIDIA_NIM_RETRIES=2` retries short non-streaming upstream failures.
+- `NVIDIA_NIM_STREAM_RETRIES=1` retries a stream only before any response bytes are sent.
+- `NVIDIA_NIM_INCLUDE_PUBLIC_CATALOG=1` adds NVIDIA's public catalog to `/models`; disabled by default for faster startup and model refresh.

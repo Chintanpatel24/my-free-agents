@@ -68,6 +68,7 @@ def main() -> int:
         os.environ["NVIDIA_NIM_BASE_URL"] = f"http://127.0.0.1:{fake_port}/v1"
         os.environ["NVIDIA_NIM_MODEL"] = "fake-model"
         os.environ["DEFAULT_MAX_TOKENS"] = "256"
+        os.environ["FREE_AGENTS_LOCAL_GREETINGS"] = "0"
         env = Path(td) / ".env"
         env.write_text("NVIDIA_NIM_API=nvapi-test-key\n", encoding="utf-8")
 

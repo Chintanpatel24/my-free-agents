@@ -18,6 +18,7 @@ from .anthropic import build_openai_request, estimate_tokens, openai_to_anthropi
 from .config import (
     DEFAULT_HOST,
     DEFAULT_NVIDIA_NIM_BASE_URL,
+    DEFAULT_NVIDIA_NIM_FAST_MODEL,
     DEFAULT_NVIDIA_NIM_MODEL,
     DEFAULT_PORT,
     get_provider,
@@ -29,6 +30,7 @@ SENSITIVE_KEYS = ("API", "API_KEY")
 
 LOG_QUEUE: collections.deque[str] = collections.deque(maxlen=50)
 LAST_LATENCY: Dict[str, float] = {"value": 0.0}
+LAST_FIRST_BYTE: Dict[str, float] = {"value": 0.0}
 
 # Global HTTPX clients for connection pooling. NVIDIA's endpoint is fast over
 # HTTP/1.1 and some local Python/http2 combinations stall for a long time, so
@@ -101,6 +103,13 @@ def env_bool(values: Dict[str, str], key: str, default: bool = False) -> bool:
     if not raw:
         return default
     return raw in ("1", "true", "yes", "on", "enabled")
+
+
+def env_int(values: Dict[str, str], key: str, default: int) -> int:
+    try:
+        return int(str(values.get(key, default)).strip())
+    except (TypeError, ValueError):
+        return default
 
 
 def http_client(values: Optional[Dict[str, str]] = None) -> httpx.Client:
@@ -341,12 +350,15 @@ def _format_models_response(ordered: list[str], selected_model: str, source: Opt
 
 def selected_upstream_model(body: Dict[str, Any], provider, values: Dict[str, str]) -> str:
     requested = str(body.get("model") or "").strip()
+    fast_model = values.get("NVIDIA_NIM_FAST_MODEL", DEFAULT_NVIDIA_NIM_FAST_MODEL).strip() or DEFAULT_NVIDIA_NIM_FAST_MODEL
+    small_alias = values.get("ANTHROPIC_SMALL_FAST_MODEL", "").strip()
+    if fast_model and ((small_alias and requested == small_alias) or "haiku" in requested.lower() or "small_fast" in requested.lower()):
+        return fast_model
     aliases = {
         "",
         "free-claude-code",
         "nim-proxy",
         values.get("ANTHROPIC_MODEL", "free-claude-code"),
-        values.get("ANTHROPIC_SMALL_FAST_MODEL", "free-claude-code"),
     }
     # If Claude Code sends a built-in Anthropic model name, map it to the
     # configured upstream model. If the user selected a real /v1/models item,
@@ -354,6 +366,60 @@ def selected_upstream_model(body: Dict[str, Any], provider, values: Dict[str, st
     if requested and requested not in aliases and not requested.startswith("claude-"):
         return requested
     return provider.model
+
+
+def _text_from_anthropic_content(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "text":
+            parts.append(str(block.get("text", "")))
+    return "\n".join(parts)
+
+
+def last_user_text(body: Dict[str, Any]) -> str:
+    for msg in reversed(body.get("messages") or []):
+        if isinstance(msg, dict) and msg.get("role") == "user":
+            return _text_from_anthropic_content(msg.get("content")).strip()
+    return ""
+
+
+def is_local_fast_greeting(body: Dict[str, Any], values: Dict[str, str]) -> bool:
+    if not env_bool(values, "FREE_AGENTS_LOCAL_GREETINGS", True):
+        return False
+    choice = body.get("tool_choice")
+    if isinstance(choice, dict) and choice.get("type") in ("any", "tool"):
+        return False
+    text = last_user_text(body).lower().strip(" \t\r\n.!?")
+    return text in {"hi", "hello", "hey", "yo", "hii", "hiii"}
+
+
+def local_text_response(text: str, request_model: str) -> Dict[str, Any]:
+    return {
+        "id": "msg_" + uuid.uuid4().hex,
+        "type": "message",
+        "role": "assistant",
+        "model": request_model or "free-claude-code",
+        "content": [{"type": "text", "text": text}],
+        "stop_reason": "end_turn",
+        "stop_sequence": None,
+        "usage": {"input_tokens": 0, "output_tokens": max(1, len(text.split()))},
+    }
+
+
+def prepare_upstream_body(body: Dict[str, Any], values: Dict[str, str]) -> Dict[str, Any]:
+    prepared = dict(body)
+    if env_bool(values, "FREE_AGENTS_FAST_MODE", True):
+        requested = env_int(values, "DEFAULT_MAX_TOKENS", 4096)
+        if prepared.get("max_tokens") is not None:
+            requested = env_int({"value": prepared.get("max_tokens")}, "value", requested)
+        cap = env_int(values, "FREE_AGENTS_FAST_MAX_TOKENS", 1536)
+        if cap > 0:
+            prepared["max_tokens"] = min(max(1, requested), cap)
+    return prepared
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -431,7 +497,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/admin":
             return self._admin_get()
         if path == "/admin/logs":
-            return self._send(200, {"logs": list(LOG_QUEUE), "latency": LAST_LATENCY.get("value", 0.0)})
+            return self._send(200, {"logs": list(LOG_QUEUE), "latency": LAST_LATENCY.get("value", 0.0), "first_byte": LAST_FIRST_BYTE.get("value", 0.0)})
         return self._send(404, {"type": "error", "error": {"type": "not_found", "message": path}})
 
     def do_POST(self):
@@ -459,13 +525,32 @@ class Handler(BaseHTTPRequestHandler):
             body = self._read_json()
             max_tokens = int(values.get("DEFAULT_MAX_TOKENS", "4096") or "4096")
             upstream_model = selected_upstream_model(body, provider, values)
-            upstream = build_openai_request(body, upstream_model, max_tokens)
+            request_model = body.get("model") or values.get("ANTHROPIC_MODEL", "free-claude-code")
+
+            if is_local_fast_greeting(body, values):
+                text = values.get("FREE_AGENTS_GREETING_TEXT", "Hi! I am ready.")
+                latency = time.time() - start_time
+                LAST_LATENCY["value"] = latency
+                LAST_FIRST_BYTE["value"] = latency
+                self.log_message("Local fast greeting completed in %.3fs", latency)
+                if body.get("stream"):
+                    return self._stream_text_response(text, request_model, start_time)
+                return self._send(200, local_text_response(text, request_model))
+
+            upstream_body = prepare_upstream_body(body, values)
+            upstream = build_openai_request(upstream_body, upstream_model, max_tokens)
+            self.log_message(
+                "Forwarding request: stream=%s model=%s messages=%d tools=%d max_tokens=%s approx_tokens=%d",
+                bool(body.get("stream")),
+                upstream_model,
+                len(body.get("messages") or []),
+                len(body.get("tools") or []),
+                upstream.get("max_tokens"),
+                estimate_tokens({"system": body.get("system"), "messages": body.get("messages"), "tools": body.get("tools")}),
+            )
 
             if body.get("stream"):
-                with stream_openai_compatible(provider, upstream, values) as resp:
-                    resp.raise_for_status()
-                    self._pipe_stream(resp, body.get("model") or values.get("ANTHROPIC_MODEL", "free-claude-code"), start_time)
-                return
+                return self._stream_messages(provider, upstream, values, request_model, start_time)
 
             resp = call_openai_compatible(provider, upstream, values)
             resp.raise_for_status()
@@ -475,7 +560,7 @@ class Handler(BaseHTTPRequestHandler):
             LAST_LATENCY["value"] = latency
             self.log_message("Request completed in %.2fs", latency)
 
-            return self._send(200, openai_to_anthropic(data, body.get("model") or values.get("ANTHROPIC_MODEL", "free-claude-code")))
+            return self._send(200, openai_to_anthropic(data, request_model))
         except httpx.HTTPStatusError as e:
             detail = e.response.text
             try:
@@ -511,7 +596,7 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
             return False
 
-    def _pipe_stream(self, resp, request_model: str, start_time: float):
+    def _start_stream(self, request_model: str) -> bool:
         try:
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -521,9 +606,59 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
         except (BrokenPipeError, ConnectionResetError, socket.timeout):
             self.close_connection = True
-            return
+            return False
         mid = "msg_" + uuid.uuid4().hex
-        if not self._sse("message_start", {"type": "message_start", "message": {"id": mid, "type": "message", "role": "assistant", "model": request_model, "content": [], "stop_reason": None, "stop_sequence": None, "usage": {"input_tokens": 0, "output_tokens": 0}}}):
+        return self._sse("message_start", {"type": "message_start", "message": {"id": mid, "type": "message", "role": "assistant", "model": request_model, "content": [], "stop_reason": None, "stop_sequence": None, "usage": {"input_tokens": 0, "output_tokens": 0}}})
+
+    def _finish_empty_stream(self, start_time: float, finish: str = "end_turn"):
+        self._sse("message_delta", {"type": "message_delta", "delta": {"stop_reason": finish, "stop_sequence": None}, "usage": {"output_tokens": 0}})
+        self._sse("message_stop", {"type": "message_stop"})
+        latency = time.time() - start_time
+        LAST_LATENCY["value"] = latency
+        self.log_message("Stream completed in %.2fs", latency)
+        self.close_connection = True
+
+    def _stream_text_response(self, text: str, request_model: str, start_time: float):
+        if not self._start_stream(request_model):
+            return
+        first = time.time() - start_time
+        LAST_FIRST_BYTE["value"] = first
+        self.log_message("First stream byte sent in %.3fs", first)
+        self._sse("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}})
+        if text:
+            self._sse("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": text}})
+        self._sse("content_block_stop", {"type": "content_block_stop", "index": 0})
+        self._finish_empty_stream(start_time)
+
+    def _stream_messages(self, provider, upstream: Dict[str, Any], values: Dict[str, str], request_model: str, start_time: float):
+        if not self._start_stream(request_model):
+            return
+        first = time.time() - start_time
+        LAST_FIRST_BYTE["value"] = first
+        self.log_message("First stream byte sent in %.3fs before upstream response", first)
+        try:
+            with stream_openai_compatible(provider, upstream, values) as resp:
+                if resp.status_code >= 400:
+                    detail = resp.read().decode("utf-8", errors="replace")[:1200]
+                    self._stream_text_after_start(f"NVIDIA NIM Error ({resp.status_code}): {detail}", start_time)
+                    return
+                resp.raise_for_status()
+                self._pipe_stream(resp, request_model, start_time, started=True)
+        except httpx.TimeoutException as e:
+            self._stream_text_after_start(f"NVIDIA NIM timed out: {e}", start_time)
+        except httpx.HTTPError as e:
+            self._stream_text_after_start(f"NVIDIA NIM connection failed: {e}", start_time)
+        except Exception as e:
+            self._stream_text_after_start(f"Proxy error: {e}", start_time)
+
+    def _stream_text_after_start(self, text: str, start_time: float):
+        self._sse("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}})
+        self._sse("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": text}})
+        self._sse("content_block_stop", {"type": "content_block_stop", "index": 0})
+        self._finish_empty_stream(start_time)
+
+    def _pipe_stream(self, resp, request_model: str, start_time: float, started: bool = False):
+        if not started and not self._start_stream(request_model):
             return
         finish = "end_turn"
         text_started = False
@@ -538,7 +673,8 @@ class Handler(BaseHTTPRequestHandler):
                     if not line or not line.startswith("data:"):
                         continue
                     if first_byte:
-                        self.log_message("First stream byte received in %.2fs", time.time() - start_time)
+                        upstream_first = time.time() - start_time
+                        self.log_message("First upstream stream byte received in %.2fs", upstream_first)
                         first_byte = False
 
                     data = line[5:].strip()
@@ -613,6 +749,9 @@ class Handler(BaseHTTPRequestHandler):
         provider = get_provider(values)
         api_value = provider.api_key or ""
         current_model = provider.model
+        current_fast_model = values.get("NVIDIA_NIM_FAST_MODEL", DEFAULT_NVIDIA_NIM_FAST_MODEL)
+        fast_max_tokens = str(env_int(values, "FREE_AGENTS_FAST_MAX_TOKENS", 1536))
+        local_greetings_checked = " checked" if env_bool(values, "FREE_AGENTS_LOCAL_GREETINGS", True) else ""
         last_model = values.get("LAST_MODEL", "")
 
         models = []
@@ -630,7 +769,9 @@ class Handler(BaseHTTPRequestHandler):
         options = "".join(f'<option value="{html.escape(m)}"{ " selected" if m == current_model else ""}>{html.escape(m)}</option>' for m in models)
 
         latency_val = LAST_LATENCY.get("value", 0.0)
+        first_byte_val = LAST_FIRST_BYTE.get("value", 0.0)
         latency_html = f"<p>Last request latency: <strong id='latencyVal'>{latency_val:.2f}s</strong></p>" if latency_val > 0 else "<p>Last request latency: <strong id='latencyVal'>N/A</strong></p>"
+        first_byte_html = f"<p>Last first byte: <strong id='firstByteVal'>{first_byte_val:.2f}s</strong></p>" if first_byte_val > 0 else "<p>Last first byte: <strong id='firstByteVal'>N/A</strong></p>"
 
         last_model_html = ""
         if last_model and last_model != current_model:
@@ -661,6 +802,7 @@ class Handler(BaseHTTPRequestHandler):
 <section>
   <h3>Performance Status</h3>
   {latency_html}
+  {first_byte_html}
   <p>HTTP/2 Upstream: <strong>{"Enabled" if env_bool(values, "NVIDIA_NIM_HTTP2", False) else "Disabled (fast default)"}</strong></p>
   <p>Connection Pooling: <strong>Active</strong></p>
   <button type="button" class="secondary" style="margin-left:0;" onclick="refreshModels()">Refresh Model List</button>
@@ -671,6 +813,9 @@ class Handler(BaseHTTPRequestHandler):
   <h3>NVIDIA NIM Settings</h3>
   <label>NVIDIA_NIM_API<input name="NVIDIA_NIM_API" value="{html.escape(mask(api_value))}" placeholder="your-api-key"></label>
   <label>Default Model (NVIDIA_NIM_MODEL)<br><select name="NVIDIA_NIM_MODEL">{options}</select></label>
+  <label>Fast Model (NVIDIA_NIM_FAST_MODEL)<input name="NVIDIA_NIM_FAST_MODEL" value="{html.escape(current_fast_model)}" placeholder="{html.escape(DEFAULT_NVIDIA_NIM_FAST_MODEL)}"></label>
+  <label>Fast Max Tokens (FREE_AGENTS_FAST_MAX_TOKENS)<input name="FREE_AGENTS_FAST_MAX_TOKENS" value="{html.escape(fast_max_tokens)}" placeholder="1536"></label>
+  <label style="display:flex;gap:.5rem;align-items:center;margin-bottom:1.5rem;"><input type="checkbox" name="FREE_AGENTS_LOCAL_GREETINGS" value="1"{local_greetings_checked} style="width:auto;margin:0;"> Instant local reply for tiny greetings</label>
   {last_model_html}
   <div style="display:flex;">
     <button type="submit">Save Settings</button>
@@ -752,6 +897,9 @@ async function updateLogs() {{
     if (data.latency > 0) {{
       document.getElementById('latencyVal').textContent = data.latency.toFixed(2) + 's';
     }}
+    if (data.first_byte > 0) {{
+      document.getElementById('firstByteVal').textContent = data.first_byte.toFixed(2) + 's';
+    }}
   }} catch (e) {{}}
 }}
 
@@ -803,7 +951,7 @@ updateLogs();
         n = int(self.headers.get("Content-Length", "0") or "0")
         form = parse_qs(self.rfile.read(n).decode("utf-8"), keep_blank_values=True)
         updates: Dict[str, str] = {}
-        allowed = {"NVIDIA_NIM_API", "NVIDIA_NIM_MODEL"}
+        allowed = {"NVIDIA_NIM_API", "NVIDIA_NIM_MODEL", "NVIDIA_NIM_FAST_MODEL", "FREE_AGENTS_FAST_MAX_TOKENS", "FREE_AGENTS_LOCAL_GREETINGS"}
         for k, v in form.items():
             if k not in allowed:
                 continue
@@ -812,6 +960,8 @@ updateLogs();
             if k == "NVIDIA_NIM_API" and "…" in val:
                 continue
             updates[k] = val
+        if "FREE_AGENTS_LOCAL_GREETINGS" not in updates:
+            updates["FREE_AGENTS_LOCAL_GREETINGS"] = "0"
 
         # Track last used model
         if "NVIDIA_NIM_MODEL" in updates:

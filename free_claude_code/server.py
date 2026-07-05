@@ -219,9 +219,6 @@ def models_response(provider, values: Dict[str, str]) -> Dict[str, Any]:
         for mid in FALLBACK_NVIDIA_NIM_MODELS:
             if mid not in ordered:
                 ordered.append(mid)
-    # Last safety filter: never return Anthropic/Claude ids from this proxy.
-    ordered = [m for m in ordered if m and not m.startswith("claude-") and "anthropic" not in m.lower()]
-
     return _format_models_response(ordered, provider.model, source)
 
 
@@ -315,8 +312,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS,HEAD")
         self.send_header("Access-Control-Allow-Headers", "content-type,authorization,anthropic-version,anthropic-beta,x-api-key")
+        self.end_headers()
+
+    def do_HEAD(self):
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
 
     def do_GET(self):

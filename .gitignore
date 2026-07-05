@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+settings.json
+.my-free-agents/
+.free-claude-code/
+*.egg-info/
+dist/
+build/
+.venv/

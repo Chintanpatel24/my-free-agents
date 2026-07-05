@@ -12,7 +12,7 @@ license = {text = "MIT"}
 authors = [{name = "My ClaudeCode contributors"}]
 keywords = ["claude-code", "anthropic", "nvidia-nim", "proxy", "python"]
 dependencies = [
-    "httpx[http2]",
+    "httpx",
 ]
 
 [project.scripts]

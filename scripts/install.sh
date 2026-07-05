@@ -14,6 +14,10 @@ err(){ printf '\033[1;31m%s\033[0m\n' "$*" >&2; }
 
 command -v "$PYTHON_BIN" >/dev/null 2>&1 || { err "Python 3.10+ is required."; exit 1; }
 
+case "$INSTALL_DIR" in
+  ""|"/"|"$HOME"|"$HOME/") err "Refusing unsafe install directory: ${INSTALL_DIR:-<empty>}"; exit 1 ;;
+esac
+
 # Check for Claude Code
 if ! command -v claude >/dev/null 2>&1; then
     warn "Claude Code CLI ('claude' command) not found. Please install it first for the best experience."
@@ -26,17 +30,20 @@ if ! command -v claude >/dev/null 2>&1; then
     fi
 fi
 
-# Check for httpx and http2
-say "Checking for high-performance dependencies (httpx, http2)..."
-if ! "$PYTHON_BIN" -c "import httpx; import h2" >/dev/null 2>&1; then
-    warn "Missing httpx or http2 support for Python. These are required for fast performance."
+# Check for httpx
+say "Checking Python HTTP dependency (httpx)..."
+if ! "$PYTHON_BIN" -c "import httpx" >/dev/null 2>&1; then
+    warn "Missing httpx for Python. It is required for the proxy."
     printf '\033[1;34m%s\033[0m ' "Would you like to install them now? (y/N):"
     read -r INSTALL_DEPS < /dev/tty
     if [[ "$INSTALL_DEPS" =~ ^[Yy]$ ]]; then
-        "$PYTHON_BIN" -m pip install "httpx[http2]" || warn "Failed to install dependencies automatically. Please run: $PYTHON_BIN -m pip install 'httpx[http2]'"
+        "$PYTHON_BIN" -m pip install "httpx" || warn "Failed to install dependencies automatically. Please run: $PYTHON_BIN -m pip install httpx"
     else
         warn "Skipping dependency installation. Note that the server may not work correctly without them."
     fi
+fi
+if ! "$PYTHON_BIN" -c "import h2" >/dev/null 2>&1; then
+    warn "Optional HTTP/2 package h2 is not installed. That is OK; HTTP/1.1 is the fast default."
 fi
 
 "$PYTHON_BIN" - <<'PY' || exit 1
@@ -139,10 +146,15 @@ fi
 if [[ -n "$USER_API_KEY" && "$USER_API_KEY" != "$EXISTING_API_KEY" ]]; then
     say "Validating API key..."
     # Simple validation check using curl to fetch models
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $USER_API_KEY" "https://integrate.api.nvidia.com/v1/models")
+    if ! command -v curl >/dev/null 2>&1; then
+        warn "curl is not available, so the API key could not be validated."
+        HTTP_CODE=""
+    else
+        HTTP_CODE=$(curl -sS --connect-timeout 8 --max-time 20 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $USER_API_KEY" "https://integrate.api.nvidia.com/v1/models" || true)
+    fi
 
     if [ "$HTTP_CODE" = "200" ]; then
-        MY_FREE_AGENTS_HOME="$INSTALL_DIR" PYTHONPATH="$INSTALL_DIR" "$PYTHON_BIN" -c "from free_claude_code.config import write_env_values; write_env_values({'NVIDIA_NIM_API': '$USER_API_KEY'})"
+        MY_FREE_AGENTS_API_KEY="$USER_API_KEY" MY_FREE_AGENTS_HOME="$INSTALL_DIR" PYTHONPATH="$INSTALL_DIR" "$PYTHON_BIN" -c 'import os; from free_claude_code.config import write_env_values; write_env_values({"NVIDIA_NIM_API": os.environ["MY_FREE_AGENTS_API_KEY"]})'
         say "API key validated and saved."
     else
         warn "API key validation failed (HTTP $HTTP_CODE). You can set it later in $ENV_FILE or via the admin UI."

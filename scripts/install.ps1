@@ -11,6 +11,10 @@ function Fail($m) { Write-Host $m -ForegroundColor Red; exit 1 }
 
 $OldInstallDir = "$env:USERPROFILE\.free-claude-code\app"
 
+if ([string]::IsNullOrWhiteSpace($InstallDir) -or $InstallDir -eq '\' -or $InstallDir -eq $env:USERPROFILE) {
+    Fail "Refusing unsafe install directory: $InstallDir"
+}
+
 try { $version = & $Python -c "import sys; print('.'.join(map(str, sys.version_info[:3])))" } catch { Fail 'Python 3.10+ is required.' }
 $majorMinor = & $Python -c "import sys; print(1 if sys.version_info >= (3,10) else 0)"
 if ($majorMinor.Trim() -ne '1') { Fail "Python 3.10+ is required. Found $version" }
@@ -26,21 +30,25 @@ if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
     }
 }
 
-# Check for httpx and http2
-Say "Checking for high-performance dependencies (httpx, http2)..."
-$HasDeps = & $Python -c "import httpx; import h2; print(1)" 2>$null
+# Check for httpx
+Say "Checking Python HTTP dependency (httpx)..."
+$HasDeps = ((& $Python -c "import httpx; print(1)" 2>$null) -join '')
 if ($HasDeps.Trim() -ne '1') {
-    Warn "Missing httpx or http2 support for Python. These are required for fast performance."
-    $InstallDeps = Read-Host "`nWould you like to install them now? (y/N)"
+    Warn "Missing httpx for Python. It is required for the proxy."
+    $InstallDeps = Read-Host "`nWould you like to install it now? (y/N)"
     if ($InstallDeps -match "^[Yy]$") {
         try {
-            & $Python -m pip install "httpx[http2]"
+            & $Python -m pip install "httpx"
         } catch {
-            Warn "Failed to install dependencies automatically. Please run: $Python -m pip install 'httpx[http2]'"
+            Warn "Failed to install dependencies automatically. Please run: $Python -m pip install httpx"
         }
     } else {
         Warn "Skipping dependency installation. Note that the server may not work correctly without them."
     }
+}
+$HasH2 = ((& $Python -c "import h2; print(1)" 2>$null) -join '')
+if ($HasH2.Trim() -ne '1') {
+    Warn "Optional HTTP/2 package h2 is not installed. That is OK; HTTP/1.1 is the fast default."
 }
 
 # Migration logic
@@ -70,11 +78,13 @@ $shimCmd1 = Join-Path $BinDir 'start-claudecode-server.cmd'
 $shimCmd2 = Join-Path $BinDir 'my-claudecode.cmd'
 $shimPs1A = Join-Path $BinDir 'start-claudecode-server.ps1'
 $shimPs1B = Join-Path $BinDir 'my-claudecode.ps1'
+$EscInstallDir = $InstallDir.Replace("'", "''")
+$EscPython = $Python.Replace("'", "''")
 
-Set-Content -Path $shimCmd1 -Encoding ASCII -Value "@echo off`r`nset MY_FREE_AGENTS_HOME=$InstallDir`r`nset PYTHONPATH=$InstallDir;%PYTHONPATH%`r`n$Python -c `"from free_claude_code.cli import main_server; main_server()`" %*`r`n"
-Set-Content -Path $shimCmd2 -Encoding ASCII -Value "@echo off`r`nset MY_FREE_AGENTS_HOME=$InstallDir`r`nset PYTHONPATH=$InstallDir;%PYTHONPATH%`r`n$Python -c `"from free_claude_code.cli import main_claude; main_claude()`" %*`r`n"
-Set-Content -Path $shimPs1A -Encoding UTF8 -Value "`$env:MY_FREE_AGENTS_HOME='$InstallDir'`n`$env:PYTHONPATH='$InstallDir;' + `$env:PYTHONPATH`n& $Python -c 'from free_claude_code.cli import main_server; main_server()' @args`n"
-Set-Content -Path $shimPs1B -Encoding UTF8 -Value "`$env:MY_FREE_AGENTS_HOME='$InstallDir'`n`$env:PYTHONPATH='$InstallDir;' + `$env:PYTHONPATH`n& $Python -c 'from free_claude_code.cli import main_claude; main_claude()' @args`n"
+Set-Content -Path $shimCmd1 -Encoding ASCII -Value "@echo off`r`nset `"MY_FREE_AGENTS_HOME=$InstallDir`"`r`nset `"PYTHONPATH=$InstallDir;%PYTHONPATH%`"`r`n`"$Python`" -c `"from free_claude_code.cli import main_server; main_server()`" %*`r`n"
+Set-Content -Path $shimCmd2 -Encoding ASCII -Value "@echo off`r`nset `"MY_FREE_AGENTS_HOME=$InstallDir`"`r`nset `"PYTHONPATH=$InstallDir;%PYTHONPATH%`"`r`n`"$Python`" -c `"from free_claude_code.cli import main_claude; main_claude()`" %*`r`n"
+Set-Content -Path $shimPs1A -Encoding UTF8 -Value "`$env:MY_FREE_AGENTS_HOME='$EscInstallDir'`n`$env:PYTHONPATH='$EscInstallDir;' + `$env:PYTHONPATH`n& '$EscPython' -c 'from free_claude_code.cli import main_server; main_server()' @args`n"
+Set-Content -Path $shimPs1B -Encoding UTF8 -Value "`$env:MY_FREE_AGENTS_HOME='$EscInstallDir'`n`$env:PYTHONPATH='$EscInstallDir;' + `$env:PYTHONPATH`n& '$EscPython' -c 'from free_claude_code.cli import main_claude; main_claude()' @args`n"
 
 $env:MY_FREE_AGENTS_HOME = $InstallDir
 $env:PYTHONPATH = "$InstallDir;$env:PYTHONPATH"
@@ -122,9 +132,11 @@ if ($UserApiKey -and $UserApiKey -ne $ExistingApiKey) {
     Say "Validating API key..."
     try {
         $headers = @{ "Authorization" = "Bearer $UserApiKey" }
-        $resp = Invoke-WebRequest -Uri "https://integrate.api.nvidia.com/v1/models" -Headers $headers -Method Get -UseBasicParsing -ErrorAction Stop
+        $resp = Invoke-WebRequest -Uri "https://integrate.api.nvidia.com/v1/models" -Headers $headers -Method Get -UseBasicParsing -TimeoutSec 20 -ErrorAction Stop
         if ($resp.StatusCode -eq 200) {
-            & $Python -c "from free_claude_code.config import write_env_values; write_env_values({'NVIDIA_NIM_API': '$UserApiKey'})"
+            $env:MY_FREE_AGENTS_API_KEY = $UserApiKey
+            & $Python -c "import os; from free_claude_code.config import write_env_values; write_env_values({'NVIDIA_NIM_API': os.environ['MY_FREE_AGENTS_API_KEY']})"
+            Remove-Item Env:\MY_FREE_AGENTS_API_KEY -ErrorAction SilentlyContinue
             Say "API key validated and saved."
         }
     } catch {

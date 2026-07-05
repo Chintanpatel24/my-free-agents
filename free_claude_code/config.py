@@ -20,7 +20,7 @@ NVIDIA_NIM_API=
 """
 
 DEFAULT_NVIDIA_NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"
-DEFAULT_NVIDIA_NIM_MODEL = ""
+DEFAULT_NVIDIA_NIM_MODEL = "meta/llama-3.1-8b-instruct"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = "2424"
 DEFAULT_MAX_TOKENS = "4096"
@@ -145,8 +145,7 @@ class ProviderConfig:
 
 def get_provider(values: Optional[Dict[str, str]] = None) -> ProviderConfig:
     values = values or load_env()
-    # If no model in env or settings, don't use a default here unless absolutely necessary
-    model = values.get("NVIDIA_NIM_MODEL", "").strip()
+    model = values.get("NVIDIA_NIM_MODEL", DEFAULT_NVIDIA_NIM_MODEL).strip() or DEFAULT_NVIDIA_NIM_MODEL
     return ProviderConfig(
         name="NVIDIA_NIM",
         base_url=values.get("NVIDIA_NIM_BASE_URL", DEFAULT_NVIDIA_NIM_BASE_URL).strip().rstrip("/"),

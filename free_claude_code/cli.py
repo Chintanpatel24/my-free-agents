@@ -46,17 +46,10 @@ def cmd_server(argv=None) -> int:
         print(f"Missing NVIDIA_NIM_API. Set it in {env_path()} or run:", file=sys.stderr)
         print("  start-claudecode-server --set-key YOUR_NVIDIA_NIM_KEY", file=sys.stderr)
         return 2
-    if not provider.model:
-        # If model is missing, it will use DEFAULT_NVIDIA_NIM_MODEL from config.py
-        pass
-
     httpd = run_server(host, port)
-    print("\n✅ My ClaudeCode NVIDIA NIM server is running")
+    print("\n My ClaudeCode NVIDIA NIM server is running")
     print(f"Provider: {provider.name}")
-    if provider.model:
-        print(f"Model:    {provider.model}")
-    else:
-        print("Model:    None selected (Please select one in the Admin UI)")
+    print(f"Model:    {provider.model}")
     print(f"Server:   http://{host}:{port}")
     print(f"Admin:    http://{host}:{port}/admin")
     print("\nOpen another terminal and run: my-claudecode\n")
@@ -109,7 +102,7 @@ def cmd_claude(argv=None) -> int:
         env["ANTHROPIC_MODEL"] = provider.model
         env["ANTHROPIC_SMALL_FAST_MODEL"] = provider.model
     else:
-        print("\n⚠️  No model selected! Please open http://127.0.0.1:2424/admin and select a model first.\n")
+        print("\n No model selected! Please open http://127.0.0.1:2424/admin and select a model first.\n")
         return 1
     # Some Claude Code builds/checks use alternate base-url variable names.
     env["ANTHROPIC_API_URL"] = base

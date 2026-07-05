@@ -8,6 +8,7 @@ import time
 import socket
 import uuid
 import httpx
+from contextlib import contextmanager
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, Iterable, Optional
@@ -29,12 +30,21 @@ SENSITIVE_KEYS = ("API", "API_KEY")
 LOG_QUEUE: collections.deque[str] = collections.deque(maxlen=50)
 LAST_LATENCY: Dict[str, float] = {"value": 0.0}
 
-# Global HTTPX client for connection pooling and HTTP/2 support.
-# Max 20 connections, keepalive 30s.
-HTTP_CLIENT = httpx.Client(
-    http2=True,
-    timeout=httpx.Timeout(300.0, connect=60.0),
-    limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+# Global HTTPX clients for connection pooling. NVIDIA's endpoint is fast over
+# HTTP/1.1 and some local Python/http2 combinations stall for a long time, so
+# HTTP/1.1 is the safe default. Set NVIDIA_NIM_HTTP2=1 to opt in.
+CLIENT_TIMEOUT = httpx.Timeout(connect=10.0, read=180.0, write=30.0, pool=10.0)
+STREAM_TIMEOUT = httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=10.0)
+FAST_TIMEOUT = httpx.Timeout(connect=5.0, read=10.0, write=10.0, pool=5.0)
+HTTP_CLIENTS: Dict[bool, Optional[httpx.Client]] = {False: None, True: None}
+RETRYABLE_HTTP_STATUS = {408, 409, 425, 429, 500, 502, 503, 504}
+RETRYABLE_EXC = (
+    httpx.ConnectError,
+    httpx.ConnectTimeout,
+    httpx.ReadError,
+    httpx.ReadTimeout,
+    httpx.RemoteProtocolError,
+    httpx.PoolTimeout,
 )
 
 # Model list cache
@@ -86,21 +96,95 @@ def provider_headers(provider, content_type: bool = True) -> Dict[str, str]:
     return headers
 
 
+def env_bool(values: Dict[str, str], key: str, default: bool = False) -> bool:
+    raw = str(values.get(key, "")).strip().lower()
+    if not raw:
+        return default
+    return raw in ("1", "true", "yes", "on", "enabled")
+
+
+def http_client(values: Optional[Dict[str, str]] = None) -> httpx.Client:
+    values = values or load_env()
+    use_http2 = env_bool(values, "NVIDIA_NIM_HTTP2", False)
+    if HTTP_CLIENTS[use_http2] is None:
+        try:
+            HTTP_CLIENTS[use_http2] = httpx.Client(
+                http2=use_http2,
+                timeout=CLIENT_TIMEOUT,
+                limits=httpx.Limits(max_connections=50, max_keepalive_connections=20, keepalive_expiry=60.0),
+            )
+        except ImportError:
+            sys.stderr.write("[http] HTTP/2 requested but h2 is not installed; falling back to HTTP/1.1\n")
+            use_http2 = False
+            if HTTP_CLIENTS[False] is None:
+                HTTP_CLIENTS[False] = httpx.Client(
+                    http2=False,
+                    timeout=CLIENT_TIMEOUT,
+                    limits=httpx.Limits(max_connections=50, max_keepalive_connections=20, keepalive_expiry=60.0),
+                )
+    return HTTP_CLIENTS[use_http2]
+
+
 def validate_provider_ready(provider):
     if not provider.base_url:
         raise ProxyError(f"{provider.name}_BASE_URL is empty")
     if provider.needs_key and (not provider.api_key or "your-key" in provider.api_key or provider.api_key == "your-api-key"):
         raise ProxyError("NVIDIA_NIM_API is missing or still a placeholder")
+    if not provider.model:
+        raise ProxyError("NVIDIA_NIM_MODEL is empty. Select a model in the Admin UI.")
 
 
-def call_openai_compatible(provider, body: Dict[str, Any]):
+def _retry_delay(attempt: int) -> float:
+    return 0.25 * (attempt + 1)
+
+
+def call_openai_compatible(provider, body: Dict[str, Any], values: Optional[Dict[str, str]] = None):
     validate_provider_ready(provider)
     url = provider.base_url.rstrip("/") + "/chat/completions"
+    values = values or load_env()
+    client = http_client(values)
 
     if body.get("stream"):
-        return HTTP_CLIENT.stream("POST", url, json=body, headers=provider_headers(provider))
-    else:
-        return HTTP_CLIENT.post(url, json=body, headers=provider_headers(provider))
+        return client.stream("POST", url, json=body, headers=provider_headers(provider), timeout=STREAM_TIMEOUT)
+
+    attempts = int(values.get("NVIDIA_NIM_RETRIES", "2") or "2") + 1
+    last_exc: Optional[Exception] = None
+    for attempt in range(max(1, attempts)):
+        try:
+            resp = client.post(url, json=body, headers=provider_headers(provider), timeout=CLIENT_TIMEOUT)
+            if resp.status_code in RETRYABLE_HTTP_STATUS and attempt + 1 < attempts:
+                resp.close()
+                time.sleep(_retry_delay(attempt))
+                continue
+            return resp
+        except RETRYABLE_EXC as exc:
+            last_exc = exc
+            if attempt + 1 >= attempts:
+                raise
+            time.sleep(_retry_delay(attempt))
+    raise last_exc or ProxyError("NVIDIA NIM request failed")
+
+
+@contextmanager
+def stream_openai_compatible(provider, body: Dict[str, Any], values: Optional[Dict[str, str]] = None):
+    values = values or load_env()
+    attempts = int(values.get("NVIDIA_NIM_STREAM_RETRIES", "1") or "1") + 1
+    last_exc: Optional[Exception] = None
+    for attempt in range(max(1, attempts)):
+        try:
+            with call_openai_compatible(provider, body, values) as resp:
+                if resp.status_code in RETRYABLE_HTTP_STATUS and attempt + 1 < attempts:
+                    resp.read()
+                    time.sleep(_retry_delay(attempt))
+                    continue
+                yield resp
+                return
+        except RETRYABLE_EXC as exc:
+            last_exc = exc
+            if attempt + 1 >= attempts:
+                raise
+            time.sleep(_retry_delay(attempt))
+    raise last_exc or ProxyError("NVIDIA NIM stream failed")
 
 
 def _looks_like_model_id(value: str) -> bool:
@@ -153,13 +237,13 @@ def extract_model_ids(data: Any) -> list[str]:
     return ids
 
 
-def fetch_json(url: str, headers: Optional[Dict[str, str]] = None, timeout: int = 30) -> Any:
-    resp = HTTP_CLIENT.get(url, headers=headers or {}, timeout=timeout)
+def fetch_json(url: str, headers: Optional[Dict[str, str]] = None, timeout: float = 10, values: Optional[Dict[str, str]] = None) -> Any:
+    resp = http_client(values).get(url, headers=headers or {}, timeout=httpx.Timeout(connect=5.0, read=timeout, write=10.0, pool=5.0))
     resp.raise_for_status()
     return resp.json()
 
 
-def list_provider_models(provider) -> tuple[list[str], str]:
+def list_provider_models(provider, values: Optional[Dict[str, str]] = None) -> tuple[list[str], str]:
     """Return NVIDIA model ids.
 
     First use NVIDIA's native OpenAI-compatible /models endpoint with the user's
@@ -172,20 +256,23 @@ def list_provider_models(provider) -> tuple[list[str], str]:
     sources: list[str] = []
 
     # Native authenticated NVIDIA API list.
-    data = fetch_json(provider.base_url.rstrip("/") + "/models", provider_headers(provider, content_type=False), 30)
+    values = values or load_env()
+    data = fetch_json(provider.base_url.rstrip("/") + "/models", provider_headers(provider, content_type=False), 10, values)
     for mid in extract_model_ids(data):
         _add_model_id(ids, mid)
     sources.append(f"native /models: {len(ids)}")
 
-    # Public NVIDIA catalog feed used only to add missing NVIDIA catalog entries.
-    try:
-        before = len(ids)
-        catalog = fetch_json(NVIDIA_FEATURED_MODELS_URL, {}, 15)
-        for mid in extract_model_ids(catalog):
-            _add_model_id(ids, mid)
-        sources.append(f"ngc catalog +{len(ids) - before}")
-    except Exception as e:
-        sources.append(f"ngc catalog unavailable: {e}")
+    # Public NVIDIA catalog feed is optional because it is slower and not needed
+    # for Claude Code's actual completion requests.
+    if env_bool(values, "NVIDIA_NIM_INCLUDE_PUBLIC_CATALOG", False):
+        try:
+            before = len(ids)
+            catalog = fetch_json(NVIDIA_FEATURED_MODELS_URL, {}, 2, values)
+            for mid in extract_model_ids(catalog):
+                _add_model_id(ids, mid)
+            sources.append(f"ngc catalog +{len(ids) - before}")
+        except Exception as e:
+            sources.append(f"ngc catalog unavailable: {e}")
 
     return ids, ", ".join(sources)
 
@@ -203,7 +290,7 @@ def models_response(provider, values: Dict[str, str]) -> Dict[str, Any]:
     try:
         # Preferred path: show ALL model ids returned by NVIDIA's native /models
         # endpoint for this key, plus NVIDIA's public catalog entries.
-        ordered, source = list_provider_models(provider)
+        ordered, source = list_provider_models(provider, values)
 
         # Update cache
         MODEL_CACHE["items"] = ordered
@@ -271,6 +358,7 @@ def selected_upstream_model(body: Dict[str, Any], provider, values: Dict[str, st
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "FreeClaudeCode/1.1"
+    protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt, *args):
         msg = "[%s] %s" % (self.log_date_time_string(), fmt % args)
@@ -374,12 +462,12 @@ class Handler(BaseHTTPRequestHandler):
             upstream = build_openai_request(body, upstream_model, max_tokens)
 
             if body.get("stream"):
-                with call_openai_compatible(provider, upstream) as resp:
+                with stream_openai_compatible(provider, upstream, values) as resp:
                     resp.raise_for_status()
                     self._pipe_stream(resp, body.get("model") or values.get("ANTHROPIC_MODEL", "free-claude-code"), start_time)
                 return
 
-            resp = call_openai_compatible(provider, upstream)
+            resp = call_openai_compatible(provider, upstream, values)
             resp.raise_for_status()
             data = resp.json()
 
@@ -406,6 +494,10 @@ class Handler(BaseHTTPRequestHandler):
             elif code == 404:
                 msg = f"Model '{upstream_model}' not found or not accessible with your API key (404 Not Found)."
             return self._send(code, {"type": "error", "error": {"type": "upstream_error", "message": msg[:4000]}})
+        except httpx.TimeoutException as e:
+            return self._send(504, {"type": "error", "error": {"type": "upstream_timeout", "message": f"NVIDIA NIM timed out: {e}"}})
+        except httpx.HTTPError as e:
+            return self._send(502, {"type": "error", "error": {"type": "upstream_network_error", "message": f"NVIDIA NIM connection failed: {e}"}})
         except Exception as e:
             return self._send(500, {"type": "error", "error": {"type": "proxy_error", "message": str(e)}})
 
@@ -438,45 +530,55 @@ class Handler(BaseHTTPRequestHandler):
         text_index = 0
         tool_calls: Dict[int, Dict[str, str]] = {}
         first_byte = True
+        stream_error = ""
 
-        for line in resp.iter_lines():
-            try:
-                if not line or not line.startswith("data:"):
+        try:
+            for line in resp.iter_lines():
+                try:
+                    if not line or not line.startswith("data:"):
+                        continue
+                    if first_byte:
+                        self.log_message("First stream byte received in %.2fs", time.time() - start_time)
+                        first_byte = False
+
+                    data = line[5:].strip()
+                    if not data or data == "[DONE]":
+                        continue
+
+                    obj = json.loads(data)
+                    choice = (obj.get("choices") or [{}])[0]
+                    delta = choice.get("delta") or {}
+                    if choice.get("finish_reason"):
+                        finish = "tool_use" if choice.get("finish_reason") == "tool_calls" else "end_turn"
+                    text = delta.get("content")
+                    if text:
+                        if not text_started:
+                            text_started = True
+                            self._sse("content_block_start", {"type": "content_block_start", "index": text_index, "content_block": {"type": "text", "text": ""}})
+                        self._sse("content_block_delta", {"type": "content_block_delta", "index": text_index, "delta": {"type": "text_delta", "text": text}})
+                    for tc in delta.get("tool_calls") or []:
+                        idx = int(tc.get("index", len(tool_calls)))
+                        cur = tool_calls.setdefault(idx, {"id": "", "name": "", "args": ""})
+                        if tc.get("id"):
+                            cur["id"] = tc.get("id")
+                        fn = tc.get("function") or {}
+                        if fn.get("name"):
+                            cur["name"] += fn.get("name")
+                        if fn.get("arguments"):
+                            cur["args"] += fn.get("arguments")
+                        finish = "tool_use"
+                except BrokenPipeError:
+                    return
+                except Exception:
                     continue
-                if first_byte:
-                    self.log_message("First stream byte received in %.2fs", time.time() - start_time)
-                    first_byte = False
+        except httpx.HTTPError as e:
+            stream_error = f"Upstream stream ended early: {e}"
+            self.log_message("%s", stream_error)
 
-                data = line[5:].strip()
-                if not data or data == "[DONE]":
-                    continue
-
-                obj = json.loads(data)
-                choice = (obj.get("choices") or [{}])[0]
-                delta = choice.get("delta") or {}
-                if choice.get("finish_reason"):
-                    finish = "tool_use" if choice.get("finish_reason") == "tool_calls" else "end_turn"
-                text = delta.get("content")
-                if text:
-                    if not text_started:
-                        text_started = True
-                        self._sse("content_block_start", {"type": "content_block_start", "index": text_index, "content_block": {"type": "text", "text": ""}})
-                    self._sse("content_block_delta", {"type": "content_block_delta", "index": text_index, "delta": {"type": "text_delta", "text": text}})
-                for tc in delta.get("tool_calls") or []:
-                    idx = int(tc.get("index", len(tool_calls)))
-                    cur = tool_calls.setdefault(idx, {"id": "", "name": "", "args": ""})
-                    if tc.get("id"):
-                        cur["id"] = tc.get("id")
-                    fn = tc.get("function") or {}
-                    if fn.get("name"):
-                        cur["name"] += fn.get("name")
-                    if fn.get("arguments"):
-                        cur["args"] += fn.get("arguments")
-                    finish = "tool_use"
-            except BrokenPipeError:
-                return
-            except Exception:
-                continue
+        if stream_error and not text_started and not tool_calls:
+            text_started = True
+            self._sse("content_block_start", {"type": "content_block_start", "index": text_index, "content_block": {"type": "text", "text": ""}})
+            self._sse("content_block_delta", {"type": "content_block_delta", "index": text_index, "delta": {"type": "text_delta", "text": stream_error}})
         block_index = 0
         if text_started:
             self._sse("content_block_stop", {"type": "content_block_stop", "index": text_index})
@@ -516,7 +618,7 @@ class Handler(BaseHTTPRequestHandler):
         models = []
         try:
             if api_value and api_value != "your-api-key":
-                models, _ = list_provider_models(provider)
+                models, _ = list_provider_models(provider, values)
         except Exception:
             pass
 
@@ -559,7 +661,7 @@ class Handler(BaseHTTPRequestHandler):
 <section>
   <h3>Performance Status</h3>
   {latency_html}
-  <p>HTTP/2 Support: <strong>Enabled</strong></p>
+  <p>HTTP/2 Upstream: <strong>{"Enabled" if env_bool(values, "NVIDIA_NIM_HTTP2", False) else "Disabled (fast default)"}</strong></p>
   <p>Connection Pooling: <strong>Active</strong></p>
   <button type="button" class="secondary" style="margin-left:0;" onclick="refreshModels()">Refresh Model List</button>
 </section>
@@ -677,7 +779,7 @@ updateLogs();
 
             # Simple test: call /models
             url = f"{DEFAULT_NVIDIA_NIM_BASE_URL}/models"
-            resp = HTTP_CLIENT.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=10)
+            resp = http_client(values).get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=FAST_TIMEOUT)
             resp.raise_for_status()
             models_data = resp.json()
             available_models = extract_model_ids(models_data)

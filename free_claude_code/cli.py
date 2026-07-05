@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .config import ensure_env, env_path, get_provider, load_env, local_base_url, write_env_values
+from .config import DEFAULT_NVIDIA_NIM_FAST_MODEL, ensure_env, env_path, get_provider, load_env, local_base_url, write_env_values
 from .server import run_server
 
 
@@ -47,9 +47,10 @@ def cmd_server(argv=None) -> int:
         print("  start-claudecode-server --set-key YOUR_NVIDIA_NIM_KEY", file=sys.stderr)
         return 2
     httpd = run_server(host, port)
-    print("\n My ClaudeCode NVIDIA NIM server is running")
+    print("\n✅ My ClaudeCode NVIDIA NIM server is running")
     print(f"Provider: {provider.name}")
     print(f"Model:    {provider.model}")
+    print(f"Fast:     {values.get('NVIDIA_NIM_FAST_MODEL', DEFAULT_NVIDIA_NIM_FAST_MODEL)}")
     print(f"Server:   http://{host}:{port}")
     print(f"Admin:    http://{host}:{port}/admin")
     print("\nOpen another terminal and run: my-claudecode\n")
@@ -73,6 +74,7 @@ def doctor() -> int:
     print(f"Provider: {provider.name} only")
     print(f"Provider base URL: {provider.base_url or 'MISSING'}")
     print(f"Provider model: {provider.model or 'MISSING'}")
+    print(f"Fast model: {values.get('NVIDIA_NIM_FAST_MODEL', DEFAULT_NVIDIA_NIM_FAST_MODEL)}")
     key_ok = bool(provider.api_key and "your-key" not in provider.api_key and provider.api_key != "your-api-key")
     key_state = "OK" if key_ok else "MISSING/PLACEHOLDER"
     print(f"Provider API key: {key_state}")
@@ -99,10 +101,11 @@ def cmd_claude(argv=None) -> int:
     # Force real NVIDIA NIM defaults. Do not keep a user's old Anthropic model
     # env vars, because that can make Claude Code show/use Claude models.
     if provider.model:
+        fast_model = values.get("NVIDIA_NIM_FAST_MODEL", DEFAULT_NVIDIA_NIM_FAST_MODEL).strip() or DEFAULT_NVIDIA_NIM_FAST_MODEL
         env["ANTHROPIC_MODEL"] = provider.model
-        env["ANTHROPIC_SMALL_FAST_MODEL"] = provider.model
+        env["ANTHROPIC_SMALL_FAST_MODEL"] = fast_model
     else:
-        print("\n No model selected! Please open http://127.0.0.1:2424/admin and select a model first.\n")
+        print("\n⚠️  No model selected! Please open http://127.0.0.1:2424/admin and select a model first.\n")
         return 1
     # Some Claude Code builds/checks use alternate base-url variable names.
     env["ANTHROPIC_API_URL"] = base

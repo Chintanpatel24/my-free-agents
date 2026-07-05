@@ -21,6 +21,7 @@ NVIDIA_NIM_API=
 
 DEFAULT_NVIDIA_NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"
 DEFAULT_NVIDIA_NIM_MODEL = "meta/llama-3.1-8b-instruct"
+DEFAULT_NVIDIA_NIM_FAST_MODEL = "meta/llama-3.1-8b-instruct"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = "2424"
 DEFAULT_MAX_TOKENS = "4096"

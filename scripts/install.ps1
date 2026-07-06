@@ -60,6 +60,12 @@ if ((Test-Path $OldInstallDir) -and -not (Test-Path $InstallDir)) {
     Warn "Migration complete. You may want to remove $OldInstallDir manually later."
 }
 
+# Clean up old package name if it exists to avoid conflicts
+$OldPackagePath = Join-Path $InstallDir 'free_claude_code'
+if (Test-Path $OldPackagePath) {
+    Remove-Item -Path $OldPackagePath -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 $SrcDir = Resolve-Path (Join-Path $PSScriptRoot '..')
 Say 'Installing My Free Agents safely for the current user...'
 New-Item -ItemType Directory -Force -Path $InstallDir, $BinDir | Out-Null
@@ -81,14 +87,14 @@ $shimPs1B = Join-Path $BinDir 'my-claudecode.ps1'
 $EscInstallDir = $InstallDir.Replace("'", "''")
 $EscPython = $Python.Replace("'", "''")
 
-Set-Content -Path $shimCmd1 -Encoding ASCII -Value "@echo off`r`nset `"MY_FREE_AGENTS_HOME=$InstallDir`"`r`nset `"PYTHONPATH=$InstallDir;%PYTHONPATH%`"`r`n`"$Python`" -c `"from free_claude_code.cli import main_server; main_server()`" %*`r`n"
-Set-Content -Path $shimCmd2 -Encoding ASCII -Value "@echo off`r`nset `"MY_FREE_AGENTS_HOME=$InstallDir`"`r`nset `"PYTHONPATH=$InstallDir;%PYTHONPATH%`"`r`n`"$Python`" -c `"from free_claude_code.cli import main_claude; main_claude()`" %*`r`n"
-Set-Content -Path $shimPs1A -Encoding UTF8 -Value "`$env:MY_FREE_AGENTS_HOME='$EscInstallDir'`n`$env:PYTHONPATH='$EscInstallDir;' + `$env:PYTHONPATH`n& '$EscPython' -c 'from free_claude_code.cli import main_server; main_server()' @args`n"
-Set-Content -Path $shimPs1B -Encoding UTF8 -Value "`$env:MY_FREE_AGENTS_HOME='$EscInstallDir'`n`$env:PYTHONPATH='$EscInstallDir;' + `$env:PYTHONPATH`n& '$EscPython' -c 'from free_claude_code.cli import main_claude; main_claude()' @args`n"
+Set-Content -Path $shimCmd1 -Encoding ASCII -Value "@echo off`r`nset `"MY_FREE_AGENTS_HOME=$InstallDir`"`r`nset `"PYTHONPATH=$InstallDir;%PYTHONPATH%`"`r`n`"$Python`" -c `"from my_claudecode_python.cli import main_server; main_server()`" %*`r`n"
+Set-Content -Path $shimCmd2 -Encoding ASCII -Value "@echo off`r`nset `"MY_FREE_AGENTS_HOME=$InstallDir`"`r`nset `"PYTHONPATH=$InstallDir;%PYTHONPATH%`"`r`n`"$Python`" -c `"from my_claudecode_python.cli import main_claude; main_claude()`" %*`r`n"
+Set-Content -Path $shimPs1A -Encoding UTF8 -Value "`$env:MY_FREE_AGENTS_HOME='$EscInstallDir'`n`$env:PYTHONPATH='$EscInstallDir;' + `$env:PYTHONPATH`n& '$EscPython' -c 'from my_claudecode_python.cli import main_server; main_server()' @args`n"
+Set-Content -Path $shimPs1B -Encoding UTF8 -Value "`$env:MY_FREE_AGENTS_HOME='$EscInstallDir'`n`$env:PYTHONPATH='$EscInstallDir;' + `$env:PYTHONPATH`n& '$EscPython' -c 'from my_claudecode_python.cli import main_claude; main_claude()' @args`n"
 
 $env:MY_FREE_AGENTS_HOME = $InstallDir
 $env:PYTHONPATH = "$InstallDir;$env:PYTHONPATH"
-& $Python -c "from free_claude_code.config import ensure_env, write_env_values; ensure_env(); write_env_values({}); print(ensure_env())" | Out-Null
+& $Python -c "from my_claudecode_python.config import ensure_env, write_env_values; ensure_env(); write_env_values({}); print(ensure_env())" | Out-Null
 
 if (-not $NoPath) {
   $current = [Environment]::GetEnvironmentVariable('Path','User')
@@ -135,7 +141,7 @@ if ($UserApiKey -and $UserApiKey -ne $ExistingApiKey) {
         $resp = Invoke-WebRequest -Uri "https://integrate.api.nvidia.com/v1/models" -Headers $headers -Method Get -UseBasicParsing -TimeoutSec 20 -ErrorAction Stop
         if ($resp.StatusCode -eq 200) {
             $env:MY_FREE_AGENTS_API_KEY = $UserApiKey
-            & $Python -c "import os; from free_claude_code.config import write_env_values; write_env_values({'NVIDIA_NIM_API': os.environ['MY_FREE_AGENTS_API_KEY']})"
+            & $Python -c "import os; from my_claudecode_python.config import write_env_values; write_env_values({'NVIDIA_NIM_API': os.environ['MY_FREE_AGENTS_API_KEY']})"
             Remove-Item Env:\MY_FREE_AGENTS_API_KEY -ErrorAction SilentlyContinue
             Say "API key validated and saved."
         }

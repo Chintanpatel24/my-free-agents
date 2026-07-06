@@ -16,8 +16,8 @@ dependencies = [
 ]
 
 [project.scripts]
-start-claudecode-server = "free_claude_code.cli:main_server"
-my-claudecode = "free_claude_code.cli:main_claude"
+start-claudecode-server = "my_claudecode_python.cli:main_server"
+my-claudecode = "my_claudecode_python.cli:main_claude"
 
 [tool.setuptools]
-packages = ["free_claude_code"]
+packages = ["my_claudecode_python"]

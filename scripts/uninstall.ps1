@@ -13,6 +13,7 @@ if ($KeepConfig) {
   $AppDir = Join-Path $RootDir 'claudecode'
   Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
     (Join-Path $AppDir 'free_claude_code'), `
+    (Join-Path $AppDir 'my_claudecode_python'), `
     (Join-Path $AppDir 'bin'), `
     (Join-Path $AppDir 'scripts'), `
     (Join-Path $AppDir 'assets'), `

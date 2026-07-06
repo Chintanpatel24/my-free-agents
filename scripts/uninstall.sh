@@ -7,7 +7,7 @@ case "$ROOT" in
 esac
 rm -f "$BIN_DIR/my-free-claudecode" "$BIN_DIR/my-claudecode-server" "$BIN_DIR/my-server-claudecode" "$BIN_DIR/my-claudecode" "$BIN_DIR/start-claudecode-server"
 if [ "${1:-}" = "--keep-config" ]; then
-  rm -rf "$ROOT/claudecode/free_claude_code" "$ROOT/claudecode/bin" "$ROOT/claudecode/scripts" "$ROOT/claudecode/pyproject.toml" "$ROOT/claudecode/README.md"
+  rm -rf "$ROOT/claudecode/free_claude_code" "$ROOT/claudecode/my_claudecode_python" "$ROOT/claudecode/bin" "$ROOT/claudecode/scripts" "$ROOT/claudecode/pyproject.toml" "$ROOT/claudecode/README.md"
 else
   rm -rf "$ROOT"
 fi

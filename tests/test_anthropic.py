@@ -1,6 +1,6 @@
 import json
 import unittest
-from free_claude_code.anthropic import build_openai_request, openai_to_anthropic
+from my_claudecode_python.anthropic import build_openai_request, openai_to_anthropic
 
 
 class AnthropicConversionTests(unittest.TestCase):

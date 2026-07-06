@@ -73,9 +73,31 @@ irm https://raw.githubusercontent.com/Chintanpatel24/my-free-agents/main/update.
 <a name="How-to-Use"></a>
 ## How to Use
 
-1. **Start the Proxy Server**:
+1. **Choose and Install Your Proxy Server**:
+   Run the new installation script to select your preferred high-performance engine:
    ```bash
+   bash install_server.sh
+   ```
+   *Engines available:*
+   - **Python (Default)**: Best compatibility, uses FastAPI + Uvicorn.
+   - **Go**: Ultra-fast, low memory usage with `fasthttp`.
+   - **Rust**: Maximum performance and safety with `axum` + `tokio`.
+   - **C++**: Lowest possible latency with `Boost.Beast`.
+
+2. **Start the Proxy Server**:
+   Depending on your choice:
+   ```bash
+   # If you chose Python
    start-claudecode-server
+
+   # If you chose Go
+   ./bin/go-proxy
+
+   # If you chose Rust
+   ./bin/rust-proxy
+
+   # If you chose C++
+   ./bin/cpp-proxy
    ```
    The server uses a fast NVIDIA NIM default model (`meta/llama-3.1-8b-instruct`) so Claude Code can start immediately. You can change it any time in the Admin UI.
 2. **Launch Claude Code**:

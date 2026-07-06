@@ -9,6 +9,18 @@
 
 # ***my-free-claudecode***
 - Use **Claude Code** with **NVIDIA NIM** models for free (using your NVIDIA NIM API key). This project provides a local proxy that translates Claude Code requests into NVIDIA NIM API calls.
+
+## High-Performance Multi-Server Architecture
+
+Choose the best engine for your needs:
+
+| Engine | Benefit | Ideal For |
+| :--- | :--- | :--- |
+| **Python** | Compatibility | Best for rapid development and full feature support. |
+| **Go** | Concurrency | High-throughput streaming with low memory footprint. |
+| **Rust** | Safety & Speed | Maximum memory safety and consistent high performance. |
+| **C++** | Latency | Ultra-low latency and bare-metal execution speed. |
+
 >[!NOTE]
 >- You must install CloudCode first, and then only should you install this proxy.
 <div align=center>

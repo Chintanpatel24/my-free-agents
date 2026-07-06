@@ -13,57 +13,27 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-use tower_http::cors::CorsLayer;
-use uuid::Uuid;
-
-#[derive(Clone)]
-struct AppState {
-    last_latency: Arc<Mutex<f64>>,
-    log_queue: Arc<Mutex<VecDeque<String>>>,
-    client: Client,
-    config: Arc<Config>,
-}
-
-struct Config {
-    nvidia_api: String,
-    nvidia_model: String,
-    base_url: String,
-    host: String,
-    port: String,
-}
+use std::time::Duration;
+use crate::server::{AppState, create_router};
 
 #[tokio::main]
 async fn main() {
-    dotenv().ok();
-    let config = Arc::new(Config {
-        nvidia_api: std::env::var("NVIDIA_NIM_API").unwrap_or_default(),
-        nvidia_model: std::env::var("NVIDIA_NIM_MODEL").unwrap_or("meta/llama-3.1-8b-instruct".to_string()),
-        base_url: std::env::var("NVIDIA_NIM_BASE_URL").unwrap_or("https://integrate.api.nvidia.com/v1".to_string()),
-        host: std::env::var("HOST").unwrap_or("127.0.0.1".to_string()),
-        port: std::env::var("PORT").unwrap_or("2424".to_string()),
-    });
+    let config = config::load_config();
+    let addr = format!("{}:{}", config.host, config.port);
 
     let state = AppState {
         last_latency: Arc::new(Mutex::new(0.0)),
         log_queue: Arc::new(Mutex::new(VecDeque::with_capacity(50))),
-        client: Client::builder()
+        client: reqwest::Client::builder()
             .timeout(Duration::from_secs(180))
             .build()
             .unwrap(),
-        config: config.clone(),
+        config,
     };
 
-    let app = Router::new()
-        .route("/", get(health))
-        .route("/health", get(health))
-        .route("/v1/messages", post(handle_messages))
-        .route("/admin", get(admin_get))
-        .layer(CorsLayer::permissive())
-        .with_state(state);
+    let app = create_router(state);
 
-    let addr = format!("{}:{}", config.host, config.port);
-    println!("🚀 Rust High-Performance Proxy: http://{}", addr);
+    println!("🚀 Rust Proxy Server: http://{}", addr);
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }

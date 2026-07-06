@@ -1,4 +1,4 @@
-use ax_sse = axum::response::sse;
+use axum::response::sse;
 use axum::{
     extract::State,
     http::StatusCode,
@@ -111,8 +111,7 @@ async fn handle_messages(
     let url = format!("{}/chat/completions", state.config.base_url.trim_end_matches('/'));
 
     if is_stream {
-        // Rust streaming logic
-        return (StatusCode::OK, "Stream not fully implemented in this placeholder").into_response();
+        return (StatusCode::OK, "Stream placeholder").into_response();
     }
 
     let resp = state.client.post(url)

@@ -739,6 +739,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._is_loopback():
             return self._send_text(403, "Admin UI is only available from localhost", "text/plain")
         values = load_env()
+        proxy_port = values.get("PROXY_PORT", DEFAULT_PROXY_PORT)
         provider = get_provider(values)
         api_value = provider.api_key or ""
         current_model = provider.model
@@ -821,7 +822,8 @@ class Handler(BaseHTTPRequestHandler):
 
 <section>
   <h3>System Info</h3>
-  <p>Server URL: <code>http://{html.escape(values.get('HOST', DEFAULT_HOST))}:{html.escape(values.get('PORT', DEFAULT_PORT))}</code></p>
+  <p>Admin UI: <code>http://{html.escape(values.get('HOST', DEFAULT_HOST))}:{html.escape(values.get('PORT', DEFAULT_PORT))}</code></p>
+  <p>Proxy Server: <code>http://{html.escape(values.get('HOST', DEFAULT_HOST))}:{html.escape(proxy_port)}</code></p>
   <p>Models endpoint: <code>/v1/models</code> (shows NVIDIA NIM model ids only)</p>
 </section>
 

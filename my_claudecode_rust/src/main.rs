@@ -10,7 +10,7 @@ use crate::server::{AppState, create_router};
 #[tokio::main]
 async fn main() {
     let config = config::load_config();
-    let addr = format!("{}:{}", config.host, config.port);
+    let addr = format!("{}:{}", config.host, config.proxy_port);
 
     let state = AppState {
         last_latency: Arc::new(Mutex::new(0.0)),

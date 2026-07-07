@@ -41,7 +41,7 @@ case $SERVER_CHOICE in
   2)
     say "Installing Go server..."
     if ! command -v go >/dev/null 2>&1; then err "Go is required."; exit 1; fi
-    cd my_claudecode_go && go build -o "$BIN_DIR/go-proxy" .
+    cd my_claudecode_go && go mod tidy && go build -o "$BIN_DIR/go-proxy" . || { err "Go build failed."; exit 1; }
     cat > "$BIN_DIR/start-claudecode-server" <<EOF
 #!/usr/bin/env bash
 export HANDLING_MODE=$HANDLING_CHOICE
@@ -56,7 +56,7 @@ EOF
   3)
     say "Installing Rust server..."
     if ! command -v cargo >/dev/null 2>&1; then err "Rust/Cargo is required."; exit 1; fi
-    cd my_claudecode_rust && cargo build --release
+    cd my_claudecode_rust && cargo build --release || { err "Rust build failed."; exit 1; }
     cp target/release/my_claudecode_rust "$BIN_DIR/rust-proxy"
     cat > "$BIN_DIR/start-claudecode-server" <<EOF
 #!/usr/bin/env bash

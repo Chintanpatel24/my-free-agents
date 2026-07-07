@@ -54,10 +54,10 @@ async fn handle_messages(
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
     let start = Instant::now();
-    let model_id = body["model"].as_str().unwrap_or(&state.config.nvidia_model);
+    let model_id = body["model"].as_str().unwrap_or(&state.config.nvidia_model).to_string();
     let is_stream = body["stream"].as_bool().unwrap_or(false);
 
-    let oa_body = anthropic::build_openai_request(body, model_id);
+    let oa_body = anthropic::build_openai_request(body.clone(), &model_id);
     let url = format!("{}/chat/completions", state.config.base_url.trim_end_matches('/'));
 
     if is_stream {
@@ -95,7 +95,7 @@ async fn handle_messages(
                 let data: Value = r.json().await.unwrap_or(json!({}));
                 let latency = start.elapsed().as_secs_f64();
                 *state.last_latency.lock().unwrap() = latency;
-                Json(anthropic::openai_to_anthropic(data, model_id)).into_response()
+            Json(anthropic::openai_to_anthropic(data, &model_id)).into_response()
             }
             Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
         }

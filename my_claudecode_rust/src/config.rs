@@ -7,6 +7,7 @@ pub const DEFAULT_NVIDIA_NIM_BASE_URL: &str = "https://integrate.api.nvidia.com/
 pub const DEFAULT_NVIDIA_NIM_MODEL: &str = "meta/llama-3.1-8b-instruct";
 pub const DEFAULT_HOST: &str = "127.0.0.1";
 pub const DEFAULT_PORT: &str = "2424";
+pub const DEFAULT_PROXY_PORT: &str = "2442";
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -15,6 +16,7 @@ pub struct Config {
     pub base_url: String,
     pub host: String,
     pub port: String,
+    pub proxy_port: String,
 }
 
 pub fn app_home() -> PathBuf {
@@ -43,5 +45,6 @@ pub fn load_config() -> Config {
         base_url: config_map.get("NVIDIA_NIM_BASE_URL").cloned().unwrap_or_else(|| DEFAULT_NVIDIA_NIM_BASE_URL.to_string()),
         host: config_map.get("HOST").cloned().unwrap_or_else(|| DEFAULT_HOST.to_string()),
         port: config_map.get("PORT").cloned().unwrap_or_else(|| DEFAULT_PORT.to_string()),
+        proxy_port: config_map.get("PROXY_PORT").cloned().unwrap_or_else(|| DEFAULT_PROXY_PORT.to_string()),
     }
 }

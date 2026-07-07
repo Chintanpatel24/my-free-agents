@@ -10,7 +10,7 @@ import (
 func main() {
 	config := LoadEnv()
 	host := getWithDefault(config, "HOST", DefaultHost)
-	port := getWithDefault(config, "PORT", DefaultPort)
+	port := getWithDefault(config, "PROXY_PORT", DefaultProxyPort)
 	addr := host + ":" + port
 
 	handler := &ProxyHandler{Config: config}

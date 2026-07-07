@@ -3,5 +3,4 @@
 >### 1. add a new provider
 >### 2. fix any existing glitches or bugs 
 >### 3. add a new feature 
->### 4. enhance the documentation 
->### 5. out of the box
+>### 4. out of the box

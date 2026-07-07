@@ -9,4 +9,8 @@ settings.json
 dist/
 build/
 .venv/
-target/
+# Build artifacts
+my_claudecode_rust/target/
+my_claudecode_cpp/build/
+my_claudecode_go/go-proxy
+bin/

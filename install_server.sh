@@ -5,6 +5,10 @@ say(){ printf '\033[1;32m%s\033[0m\n' "$*"; }
 warn(){ printf '\033[1;33m%s\033[0m\n' "$*"; }
 err(){ printf '\033[1;31m%s\033[0m\n' "$*" >&2; }
 
+# Ensure we are in the repository root relative to the script location
+SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SRC_DIR"
+
 echo "------------------------------------------------"
 echo "  My Free Agents - Multi-Language Installation"
 echo "------------------------------------------------"
@@ -40,6 +44,11 @@ case $SERVER_CHOICE in
     cd my_claudecode_go && go build -o "$BIN_DIR/go-proxy" .
     cat > "$BIN_DIR/start-claudecode-server" <<EOF
 #!/usr/bin/env bash
+export HANDLING_MODE=$HANDLING_CHOICE
+if [ "\$HANDLING_MODE" = "1" ]; then
+  # Start Python Admin UI in background
+  PYTHONPATH="$INSTALL_DIR" python3 -m my_claudecode_python.cli --admin-only &
+fi
 exec "$BIN_DIR/go-proxy" "\$@"
 EOF
     chmod +x "$BIN_DIR/start-claudecode-server"
@@ -51,6 +60,11 @@ EOF
     cp target/release/my_claudecode_rust "$BIN_DIR/rust-proxy"
     cat > "$BIN_DIR/start-claudecode-server" <<EOF
 #!/usr/bin/env bash
+export HANDLING_MODE=$HANDLING_CHOICE
+if [ "\$HANDLING_MODE" = "1" ]; then
+  # Start Python Admin UI in background
+  PYTHONPATH="$INSTALL_DIR" python3 -m my_claudecode_python.cli --admin-only &
+fi
 exec "$BIN_DIR/rust-proxy" "\$@"
 EOF
     chmod +x "$BIN_DIR/start-claudecode-server"
@@ -63,6 +77,11 @@ EOF
     cp my_claudecode_cpp "$BIN_DIR/cpp-proxy"
     cat > "$BIN_DIR/start-claudecode-server" <<EOF
 #!/usr/bin/env bash
+export HANDLING_MODE=$HANDLING_CHOICE
+if [ "\$HANDLING_MODE" = "1" ]; then
+  # Start Python Admin UI in background
+  PYTHONPATH="$INSTALL_DIR" python3 -m my_claudecode_python.cli --admin-only &
+fi
 exec "$BIN_DIR/cpp-proxy" "\$@"
 EOF
     chmod +x "$BIN_DIR/start-claudecode-server"

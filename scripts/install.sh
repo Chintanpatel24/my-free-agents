@@ -63,6 +63,9 @@ fi
 say "Installing $APP_NAME safely for the current user..."
 mkdir -p "$INSTALL_DIR" "$BIN_DIR"
 
+# Clean up old package name if it exists to avoid rsync/cp conflicts
+rm -rf "$INSTALL_DIR/free_claude_code"
+
 if command -v rsync >/dev/null 2>&1; then
   rsync -a --delete \
     --exclude '.git' --exclude '.env' --exclude '__pycache__' --exclude '*.pyc' \
@@ -91,17 +94,17 @@ cat > "$BIN_DIR/start-claudecode-server" <<EOF
 #!/usr/bin/env bash
 export MY_FREE_AGENTS_HOME="$INSTALL_DIR"
 export PYTHONPATH="$INSTALL_DIR:\${PYTHONPATH:-}"
-exec "$PYTHON_BIN" -c 'from free_claude_code.cli import main_server; main_server()' "\$@"
+exec "$PYTHON_BIN" -c 'from my_claudecode_python.cli import main_server; main_server()' "\$@"
 EOF
 cat > "$BIN_DIR/my-claudecode" <<EOF
 #!/usr/bin/env bash
 export MY_FREE_AGENTS_HOME="$INSTALL_DIR"
 export PYTHONPATH="$INSTALL_DIR:\${PYTHONPATH:-}"
-exec "$PYTHON_BIN" -c 'from free_claude_code.cli import main_claude; main_claude()' "\$@"
+exec "$PYTHON_BIN" -c 'from my_claudecode_python.cli import main_claude; main_claude()' "\$@"
 EOF
 chmod 700 "$BIN_DIR/start-claudecode-server" "$BIN_DIR/my-claudecode"
 
-MY_FREE_AGENTS_HOME="$INSTALL_DIR" PYTHONPATH="$INSTALL_DIR" "$PYTHON_BIN" -c 'from free_claude_code.config import ensure_env, write_env_values; ensure_env(); write_env_values({}); print(ensure_env())' >/tmp/my-free-agents-env-path.txt
+MY_FREE_AGENTS_HOME="$INSTALL_DIR" PYTHONPATH="$INSTALL_DIR" "$PYTHON_BIN" -c 'from my_claudecode_python.config import ensure_env, write_env_values; ensure_env(); write_env_values({}); print(ensure_env())' >/tmp/my-free-agents-env-path.txt
 ENV_FILE="$(cat /tmp/my-free-agents-env-path.txt)"
 rm -f /tmp/my-free-agents-env-path.txt
 chmod 600 "$ENV_FILE" 2>/dev/null || true
@@ -130,7 +133,10 @@ if [ -f "$ENV_FILE" ]; then
     EXISTING_API_KEY=$(grep "^NVIDIA_NIM_API=" "$ENV_FILE" | cut -d'=' -f2)
 fi
 
-if [[ -n "$EXISTING_API_KEY" && "$EXISTING_API_KEY" != "your-api-key" && -z "${EXISTING_API_KEY// }" ]]; then
+if [[ "${MY_FREE_AGENTS_SKIP_API_PROMPT:-0}" == "1" ]]; then
+    say "Skipping API key prompt as requested."
+    USER_API_KEY=""
+elif [[ -n "$EXISTING_API_KEY" && "$EXISTING_API_KEY" != "your-api-key" && -z "${EXISTING_API_KEY// }" ]]; then
     # Prompt for API Key (read from /dev/tty to support piped installation)
     printf '\n\033[1;34m%s\033[0m ' "Please enter your NVIDIA NIM API key (Press Enter to skip and do it manually later):"
     read -r USER_API_KEY < /dev/tty
@@ -154,7 +160,7 @@ if [[ -n "$USER_API_KEY" && "$USER_API_KEY" != "$EXISTING_API_KEY" ]]; then
     fi
 
     if [ "$HTTP_CODE" = "200" ]; then
-        MY_FREE_AGENTS_API_KEY="$USER_API_KEY" MY_FREE_AGENTS_HOME="$INSTALL_DIR" PYTHONPATH="$INSTALL_DIR" "$PYTHON_BIN" -c 'import os; from free_claude_code.config import write_env_values; write_env_values({"NVIDIA_NIM_API": os.environ["MY_FREE_AGENTS_API_KEY"]})'
+        MY_FREE_AGENTS_API_KEY="$USER_API_KEY" MY_FREE_AGENTS_HOME="$INSTALL_DIR" PYTHONPATH="$INSTALL_DIR" "$PYTHON_BIN" -c 'import os; from my_claudecode_python.config import write_env_values; write_env_values({"NVIDIA_NIM_API": os.environ["MY_FREE_AGENTS_API_KEY"]})'
         say "API key validated and saved."
     else
         warn "API key validation failed (HTTP $HTTP_CODE). You can set it later in $ENV_FILE or via the admin UI."

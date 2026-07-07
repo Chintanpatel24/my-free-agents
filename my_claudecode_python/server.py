@@ -739,6 +739,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._is_loopback():
             return self._send_text(403, "Admin UI is only available from localhost", "text/plain")
         values = load_env()
+        proxy_port = values.get("PROXY_PORT", DEFAULT_PROXY_PORT)
         provider = get_provider(values)
         api_value = provider.api_key or ""
         current_model = provider.model
@@ -758,6 +759,8 @@ class Handler(BaseHTTPRequestHandler):
                 models = [current_model] + models
 
         options = "".join(f'<option value="{html.escape(m)}"{ " selected" if m == current_model else ""}>{html.escape(m)}</option>' for m in models)
+
+        provider_options = "".join(f'<option value="{p}"{ " selected" if p == provider.name else ""}>{p.replace("_", " ")}</option>' for p in PROVIDERS)
 
         latency_val = LAST_LATENCY.get("value", 0.0)
         first_byte_val = LAST_FIRST_BYTE.get("value", 0.0)
@@ -801,10 +804,24 @@ class Handler(BaseHTTPRequestHandler):
 
 <form id="configForm" method="post">
 <section>
+  <h3>Provider Selection</h3>
+  <label>Active Provider<br><select name="PROVIDER">{provider_options}</select></label>
+</section>
+
+<section>
   <h3>NVIDIA NIM Settings</h3>
   <label>NVIDIA_NIM_API<input name="NVIDIA_NIM_API" value="{html.escape(mask(api_value))}" placeholder="your-api-key"></label>
   <label>Selected Model (NVIDIA_NIM_MODEL)<br><select name="NVIDIA_NIM_MODEL">{options}</select></label>
   <label style="display:flex;gap:.5rem;align-items:center;margin-bottom:1.5rem;"><input type="checkbox" name="FREE_AGENTS_LOCAL_GREETINGS" value="1"{local_greetings_checked} style="width:auto;margin:0;"> Instant local reply for tiny greetings</label>
+</section>
+
+<section>
+  <h3>OpenRouter Settings</h3>
+  <label>OPENROUTER_API_KEY<input name="OPENROUTER_API_KEY" value="{html.escape(mask(values.get('OPENROUTER_API_KEY', '')))}" placeholder="sk-or-..."></label>
+  <label>OpenRouter Model<input name="OPENROUTER_MODEL" value="{html.escape(values.get('OPENROUTER_MODEL', DEFAULT_OPENROUTER_MODEL))}"></label>
+</section>
+
+<section>
   {last_model_html}
   <div style="display:flex;">
     <button type="submit">Save Settings</button>
@@ -821,7 +838,8 @@ class Handler(BaseHTTPRequestHandler):
 
 <section>
   <h3>System Info</h3>
-  <p>Server URL: <code>http://{html.escape(values.get('HOST', DEFAULT_HOST))}:{html.escape(values.get('PORT', DEFAULT_PORT))}</code></p>
+  <p>Admin UI: <code>http://{html.escape(values.get('HOST', DEFAULT_HOST))}:{html.escape(values.get('PORT', DEFAULT_PORT))}</code></p>
+  <p>Proxy Server: <code>http://{html.escape(values.get('HOST', DEFAULT_HOST))}:{html.escape(proxy_port)}</code></p>
   <p>Models endpoint: <code>/v1/models</code> (shows NVIDIA NIM model ids only)</p>
 </section>
 
@@ -940,13 +958,13 @@ updateLogs();
         n = int(self.headers.get("Content-Length", "0") or "0")
         form = parse_qs(self.rfile.read(n).decode("utf-8"), keep_blank_values=True)
         updates: Dict[str, str] = {}
-        allowed = {"NVIDIA_NIM_API", "NVIDIA_NIM_MODEL", "FREE_AGENTS_LOCAL_GREETINGS"}
+        allowed = {"NVIDIA_NIM_API", "NVIDIA_NIM_MODEL", "FREE_AGENTS_LOCAL_GREETINGS", "PROVIDER", "OPENROUTER_API_KEY", "OPENROUTER_MODEL"}
         for k, v in form.items():
             if k not in allowed:
                 continue
             val = v[0].strip()
             # Keep old key if the user submitted the masked value.
-            if k == "NVIDIA_NIM_API" and "…" in val:
+            if k in ("NVIDIA_NIM_API", "OPENROUTER_API_KEY") and "…" in val:
                 continue
             updates[k] = val
         if "FREE_AGENTS_LOCAL_GREETINGS" not in updates:

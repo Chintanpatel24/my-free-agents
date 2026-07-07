@@ -72,7 +72,7 @@ def main() -> int:
         env = Path(td) / ".env"
         env.write_text("NVIDIA_NIM_API=nvapi-test-key\n", encoding="utf-8")
 
-        from free_claude_code.server import run_server
+        from my_claudecode_python.server import run_server
         proxy = run_server("127.0.0.1", 0)
         start_server(proxy)
         proxy_port = proxy.server_address[1]

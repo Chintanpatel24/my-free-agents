@@ -21,11 +21,14 @@ NVIDIA_NIM_API=
 
 DEFAULT_NVIDIA_NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"
 DEFAULT_NVIDIA_NIM_MODEL = "meta/llama-3.1-8b-instruct"
+DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+DEFAULT_OPENROUTER_MODEL = "google/gemini-2.0-flash-exp:free"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = "2424"
+DEFAULT_PROXY_PORT = "2442"
 DEFAULT_MAX_TOKENS = "4096"
 DEFAULT_CLAUDE_BINARY = "claude"
-PROVIDERS = ["NVIDIA_NIM"]
+PROVIDERS = ["NVIDIA_NIM", "OPENROUTER"]
 
 
 def app_home() -> Path:
@@ -145,6 +148,17 @@ class ProviderConfig:
 
 def get_provider(values: Optional[Dict[str, str]] = None) -> ProviderConfig:
     values = values or load_env()
+    name = values.get("PROVIDER", "NVIDIA_NIM").upper()
+    if name == "OPENROUTER":
+        model = values.get("OPENROUTER_MODEL", DEFAULT_OPENROUTER_MODEL).strip() or DEFAULT_OPENROUTER_MODEL
+        return ProviderConfig(
+            name="OPENROUTER",
+            base_url=values.get("OPENROUTER_BASE_URL", DEFAULT_OPENROUTER_BASE_URL).strip().rstrip("/"),
+            api_key=(values.get("OPENROUTER_API_KEY") or "").strip(),
+            model=model,
+            needs_key=True,
+        )
+
     model = values.get("NVIDIA_NIM_MODEL", DEFAULT_NVIDIA_NIM_MODEL).strip() or DEFAULT_NVIDIA_NIM_MODEL
     return ProviderConfig(
         name="NVIDIA_NIM",

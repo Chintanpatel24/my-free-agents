@@ -5,56 +5,92 @@ say(){ printf '\033[1;32m%s\033[0m\n' "$*"; }
 warn(){ printf '\033[1;33m%s\033[0m\n' "$*"; }
 err(){ printf '\033[1;31m%s\033[0m\n' "$*" >&2; }
 
-echo "Select a server to install:"
-echo "1) Python (Default) - High compatibility"
-echo "2) Go - High performance, low memory"
-echo "3) Rust - Maximum safety and speed"
-echo "4) C++ - Ultra-low latency"
-printf "Enter choice (1-4): "
-read -r CHOICE < /dev/tty
+# Ensure we are in the repository root relative to the script location
+SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SRC_DIR"
 
-CHOICE=${CHOICE:-1}
+echo "------------------------------------------------"
+echo "  My Free Agents - Multi-Language Installation"
+echo "------------------------------------------------"
+echo "Select the proxy server language:"
+echo "1) Python (Default) - Best compatibility & easy setup"
+echo "2) Go - High performance, efficient concurrency"
+echo "3) Rust - Maximum safety, speed & memory efficiency"
+echo "4) C++ - Ultra-low latency, bare-metal performance"
+printf "Enter choice (1-4) [1]: "
+read -r SERVER_CHOICE < /dev/tty
+SERVER_CHOICE=${SERVER_CHOICE:-1}
 
-case $CHOICE in
+echo ""
+echo "Select the configuration/admin handling language:"
+echo "1) Python (Default) - Recommended: robust Admin UI"
+echo "2) Native - Minimal Admin UI (limited features)"
+printf "Enter choice (1-2) [1]: "
+read -r HANDLING_CHOICE < /dev/tty
+HANDLING_CHOICE=${HANDLING_CHOICE:-1}
+
+# Skip API key prompt in server-focused install; configure via Admin UI later.
+export MY_FREE_AGENTS_SKIP_API_PROMPT=1
+
+INSTALL_DIR="${MY_FREE_AGENTS_INSTALL_DIR:-$HOME/.my-free-agents/claudecode}"
+BIN_DIR="${MY_FREE_AGENTS_BIN_DIR:-$HOME/.local/bin}"
+mkdir -p "$BIN_DIR"
+
+case $SERVER_CHOICE in
   1)
     say "Installing Python server..."
-    pip install fastapi uvicorn httpx
-    say "To start: start-claudecode-server"
+    bash scripts/install.sh
     ;;
   2)
     say "Installing Go server..."
-    if ! command -v go >/dev/null 2>&1; then
-        err "Go is not installed. Please install it first."
-        exit 1
-    fi
-    cd my_claudecode_go && go build -o ../bin/go-proxy main.go
-    say "To start: ./bin/go-proxy"
+    if ! command -v go >/dev/null 2>&1; then err "Go is required."; exit 1; fi
+    cd my_claudecode_go && go mod tidy && go build -o "$BIN_DIR/go-proxy" . || { err "Go build failed."; exit 1; }
+    cat > "$BIN_DIR/start-claudecode-server" <<EOF
+#!/usr/bin/env bash
+export HANDLING_MODE=$HANDLING_CHOICE
+if [ "\$HANDLING_MODE" = "1" ]; then
+  # Start Python Admin UI in background
+  PYTHONPATH="$INSTALL_DIR" python3 -m my_claudecode_python.cli --admin-only &
+fi
+exec "$BIN_DIR/go-proxy" "\$@"
+EOF
+    chmod +x "$BIN_DIR/start-claudecode-server"
     ;;
   3)
     say "Installing Rust server..."
-    if ! command -v cargo >/dev/null 2>&1; then
-        err "Rust/Cargo is not installed. Please install it first."
-        exit 1
-    fi
-    cd my_claudecode_rust && cargo build --release
-    cp target/release/my_claudecode_rust ../bin/rust-proxy
-    say "To start: ./bin/rust-proxy"
+    if ! command -v cargo >/dev/null 2>&1; then err "Rust/Cargo is required."; exit 1; fi
+    cd my_claudecode_rust && cargo build --release || { err "Rust build failed."; exit 1; }
+    cp target/release/my_claudecode_rust "$BIN_DIR/rust-proxy"
+    cat > "$BIN_DIR/start-claudecode-server" <<EOF
+#!/usr/bin/env bash
+export HANDLING_MODE=$HANDLING_CHOICE
+if [ "\$HANDLING_MODE" = "1" ]; then
+  # Start Python Admin UI in background
+  PYTHONPATH="$INSTALL_DIR" python3 -m my_claudecode_python.cli --admin-only &
+fi
+exec "$BIN_DIR/rust-proxy" "\$@"
+EOF
+    chmod +x "$BIN_DIR/start-claudecode-server"
     ;;
   4)
     say "Installing C++ server..."
-    if ! command -v cmake >/dev/null 2>&1; then
-        err "CMake and G++ are required. Please install them first."
-        exit 1
-    fi
+    if ! command -v cmake >/dev/null 2>&1; then err "CMake is required."; exit 1; fi
     mkdir -p my_claudecode_cpp/build
     cd my_claudecode_cpp/build && cmake .. && make -j$(nproc)
-    cp my_claudecode_cpp ../../bin/cpp-proxy
-    say "To start: ./bin/cpp-proxy"
+    cp my_claudecode_cpp "$BIN_DIR/cpp-proxy"
+    cat > "$BIN_DIR/start-claudecode-server" <<EOF
+#!/usr/bin/env bash
+export HANDLING_MODE=$HANDLING_CHOICE
+if [ "\$HANDLING_MODE" = "1" ]; then
+  # Start Python Admin UI in background
+  PYTHONPATH="$INSTALL_DIR" python3 -m my_claudecode_python.cli --admin-only &
+fi
+exec "$BIN_DIR/cpp-proxy" "\$@"
+EOF
+    chmod +x "$BIN_DIR/start-claudecode-server"
     ;;
   *)
-    err "Invalid choice."
-    exit 1
-    ;;
+    err "Invalid choice."; exit 1 ;;
 esac
 
-say "Installation complete!"
+say "Installation complete! Start with: start-claudecode-server"

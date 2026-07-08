@@ -6,6 +6,7 @@
 
 >[!IMPORTANT]
 >- I am making a direct experiment on the `main` branch for some reasons, so if you want to use that, just download the latest release `1.0.2` or the `version 1.0.0` zip and install it with the scripts. and use it
+>- And yeah, it works absolutely fine.
 
 # ***my-free-claudecode***
 - Use **Claude Code** with **NVIDIA NIM** models for free (using your NVIDIA NIM API key). This project provides a local proxy that translates Claude Code requests into NVIDIA NIM API calls.

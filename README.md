@@ -5,7 +5,7 @@
 </div>
 
 >[!IMPORTANT]
->I am making a direct experiment on the `main` branch for some reasons, so if you want to use that, just download the latest release `1.0.2` or the `version 1.0.0` zip and install it with the scripts. and use it 
+>- I am making a direct experiment on the `main` branch for some reasons, so if you want to use that, just download the latest release `1.0.2` or the `version 1.0.0` zip and install it with the scripts. and use it
 
 # ***my-free-claudecode***
 - Use **Claude Code** with **NVIDIA NIM** models for free (using your NVIDIA NIM API key). This project provides a local proxy that translates Claude Code requests into NVIDIA NIM API calls.
@@ -87,7 +87,8 @@ irm https://raw.githubusercontent.com/Chintanpatel24/my-free-agents/main/update.
 
 <a name="How-to-Use"></a>
 ## How to Use
-
+>[!TIP]
+>- Use `Gemma-4-31B-IT` for the absolute and fast result because using a model like `GLM-5.2` will make delays in that and is not a good option with it. 
 1. **Choose and Install Your Proxy Server**:
    Run the new installation script to select your preferred high-performance engine:
    ```bash

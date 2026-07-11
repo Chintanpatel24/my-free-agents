@@ -10,16 +10,18 @@ use crate::server::{AppState, create_router};
 #[tokio::main]
 async fn main() {
     let config = config::load_config();
-    let addr = format!("{}:{}", config.host, config.proxy_port);
+    let addr = format!("{}:{}", config.host, config.port);
 
     let state = AppState {
         last_latency: Arc::new(Mutex::new(0.0)),
         log_queue: Arc::new(Mutex::new(VecDeque::with_capacity(50))),
         client: reqwest::Client::builder()
+            .tcp_nodelay(true)
+            .pool_idle_timeout(Duration::from_secs(90))
             .timeout(Duration::from_secs(180))
             .build()
             .unwrap(),
-        config,
+        config: Arc::new(Mutex::new(config)),
     };
 
     let app = create_router(state);

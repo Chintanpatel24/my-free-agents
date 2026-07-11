@@ -37,8 +37,7 @@ def main_server():
 def main_claude():
     values = load_env()
     host = values.get("HOST", DEFAULT_HOST)
-    # Claude should talk to the proxy port
-    port = values.get("PROXY_PORT", DEFAULT_PROXY_PORT)
+    port = values.get("PORT", DEFAULT_PORT)
 
     os.environ["ANTHROPIC_BASE_URL"] = f"http://{host}:{port}"
     os.environ["ANTHROPIC_API_KEY"] = "sk-ant-free-agents-123"

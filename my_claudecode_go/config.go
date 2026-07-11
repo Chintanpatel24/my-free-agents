@@ -16,7 +16,6 @@ const (
 	DefaultNvidiaNimModel     = "meta/llama-3.1-8b-instruct"
 	DefaultHost                = "127.0.0.1"
 	DefaultPort                = "2424"
-	DefaultProxyPort           = "2442"
 	DefaultMaxTokens           = "4096"
 )
 

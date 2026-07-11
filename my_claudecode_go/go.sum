@@ -10,5 +10,3 @@ github.com/valyala/bytebufferpool v1.0.0 h1:GqA5TC/0021Y/b9FG4Oi9Mr3q7XYx6Kllzaw
 github.com/valyala/bytebufferpool v1.0.0/go.mod h1:6bBcMArwyJ5K/AmCkWv1jt77kVWyCJ6HpOuEn7z0Csc=
 github.com/valyala/fasthttp v1.72.0 h1:R7kYdoWhn1ye1fVpP+cDHDJwYm3NkwLliwgzJ/Abg7M=
 github.com/valyala/fasthttp v1.72.0/go.mod h1:zsbLTYqcpIktdQytlVBwIjY9La5d6bs990nBxWg8efk=
-github.com/xyproto/randomstring v1.0.5 h1:YtlWPoRdgMu3NZtP45drfy1GKoojuR7hmRcnhZqKjWU=
-github.com/xyproto/randomstring v1.0.5/go.mod h1:rgmS5DeNXLivK7YprL0pY+lTuhNQW3iGxZ18UQApw/E=

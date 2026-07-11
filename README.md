@@ -28,8 +28,7 @@ Choose the best engine for your needs:
 </div>
 
 ## How It Works
-
-Here is the detailed high-performance multi-server proxy architecture showing how requests flow, translate, and stream between Claude Code and the NVIDIA NIM APIs:
+>Here is the detailed high-performance multi-server proxy architecture showing how requests flow, translate, and stream between Claude Code and the NVIDIA NIM APIs:
 
 ```mermaid
 graph TD

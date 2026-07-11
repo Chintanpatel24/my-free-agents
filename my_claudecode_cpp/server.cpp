@@ -17,25 +17,6 @@ namespace ssl = boost::asio::ssl;
 using tcp = boost::asio::ip::tcp;
 using json = nlohmann::json;
 
-// Simplified Anthropic to OpenAI mapping for C++
-json build_openai_request(const json& anthropic, const std::string& model_id) {
-    json messages = json::array();
-    if (anthropic.contains("system") && anthropic["system"].is_string()) {
-        messages.push_back({{"role", "system"}, {"content", anthropic["system"]}});
-    }
-    if (anthropic.contains("messages") && anthropic["messages"].is_array()) {
-        for (const auto& msg : anthropic["messages"]) {
-            messages.push_back({{"role", msg["role"]}, {"content", msg["content"]}});
-        }
-    }
-    return {
-        {"model", model_id},
-        {"messages", messages},
-        {"stream", anthropic.value("stream", false)},
-        {"max_tokens", anthropic.value("max_tokens", 4096)}
-    };
-}
-
 void handle_request(http::request<http::string_body>&& req, http::response<http::string_body>& res) {
     if (req.target() == "/health" || req.target() == "/") {
         res.result(http::status::ok);

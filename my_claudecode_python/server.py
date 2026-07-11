@@ -52,6 +52,7 @@ STATE.load()
 SENSITIVE_KEYS = ("API", "API_KEY")
 LAST_LATENCY: Dict[str, float] = {"value": 0.0}
 LAST_FIRST_BYTE: Dict[str, float] = {"value": 0.0}
+LOG_QUEUE = collections.deque(maxlen=200)
 
 # Global HTTPX clients for connection pooling. NVIDIA's endpoint is fast over
 # HTTP/1.1 and some local Python/http2 combinations stall for a long time, so
@@ -537,7 +538,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._admin_test()
         return self._send(404, {"type": "error", "error": {"type": "not_found", "message": path}})
 
-def _messages(self):
+    def _messages(self):
         start_time = time.time()
         upstream_model = "unknown"
         try:

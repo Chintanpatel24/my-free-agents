@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NIM Proxy Admin</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card: #1e293b;
+            --text: #f8fafc;
+            --accent: #38bdf8;
+            --danger: #ef4444;
+        }
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            display: flex;
+            justify-content: center;
+            padding: 2rem;
+        }
+        .container {
+            width: 100%;
+            max-width: 600px;
+            background: var(--card);
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        }
+        h1 { color: var(--accent); margin-bottom: 1.5rem; }
+        .form-group { margin-bottom: 1rem; }
+        label { display: block; margin-bottom: 0.5rem; font-weight: 500; }
+        input {
+            width: 100%;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            border: 1px solid #334155;
+            background: #0f172a;
+            color: white;
+            box-sizing: border-box;
+        }
+        button {
+            background: var(--accent);
+            color: var(--bg);
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            font-weight: bold;
+            cursor: pointer;
+            width: 100%;
+            transition: opacity 0.2s;
+        }
+        button:hover { opacity: 0.9; }
+        .status {
+            margin-top: 1rem;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            display: none;
+            text-align: center;
+        }
+        .success { background: #065f46; display: block; }
+        .error { background: #991b1b; display: block; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>⚙️ Proxy Configuration</h1>
+        <div class="form-group">
+            <label>NVIDIA API Key</label>
+            <input type="password" id="apiKey" placeholder="nvapi-...">
+        </div>
+        <div class="form-group">
+            <label>Model ID</label>
+            <input type="text" id="modelId" placeholder="meta/llama-3.1-405b-instruct">
+        </div>
+        <div class="form-group">
+            <label>Base URL</label>
+            <input type="text" id="baseUrl" value="https://integrate.api.nvidia.com/v1">
+        </div>
+        <button onclick="saveConfig()">Save Configuration</button>
+        <div id="status" class="status"></div>
+    </div>
+    <script>
+        async function saveConfig() {
+            const status = document.getElementById('status');
+            const config = {
+                nvidia_api: document.getElementById('apiKey').value,
+                nvidia_model: document.getElementById('modelId').value,
+                base_url: document.getElementById('baseUrl').value
+            };
+
+            try {
+                const res = await fetch('/admin/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+                if (res.ok) {
+                    status.textContent = '✅ Configuration saved successfully!';
+                    status.className = 'status success';
+                } else {
+                    throw new Error('Failed to save');
+                }
+            } catch (e) {
+                status.textContent = '❌ Error saving config: ' + e.message;
+                status.className = 'status error';
+            }
+        }
+    </script>
+</body>
+</html>

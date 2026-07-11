@@ -8,12 +8,21 @@ import (
 )
 
 func main() {
-	config := LoadEnv()
-	host := getWithDefault(config, "HOST", DefaultHost)
-	port := getWithDefault(config, "PROXY_PORT", DefaultProxyPort)
+	configMap := LoadEnv()
+	host := getWithDefault(configMap, "HOST", DefaultHost)
+	port := getWithDefault(configMap, "PORT", DefaultPort)
 	addr := host + ":" + port
 
-	handler := &ProxyHandler{Config: config}
+	// Initialize dynamic config from environment
+	dynamicConfig := &Config{
+		NvidiaNimApi:    getWithDefault(configMap, "NVIDIA_NIM_API", ""),
+		NvidiaNimModel:   getWithDefault(configMap, "NVIDIA_NIM_MODEL", DefaultNvidiaNimModel),
+		NvidiaNimBaseUrl: getWithDefault(configMap, "NVIDIA_NIM_BASE_URL", DefaultNvidiaNimBaseURL),
+	}
+
+	handler := &ProxyHandler{
+		config: dynamicConfig,
+	}
 
 	fmt.Printf("Starting Go proxy server on http://%s\n", addr)
 	fmt.Printf("Admin UI available at http://%s/admin\n", addr)

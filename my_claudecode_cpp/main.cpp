@@ -28,10 +28,10 @@ void do_session(tcp::socket socket) {
 int main() {
     try {
         auto const address = net::ip::make_address("127.0.0.1");
-        unsigned short port = 2442;
+        unsigned short port = 2424;
         net::io_context ioc{1};
         tcp::acceptor acceptor{ioc, {address, port}};
-        std::cout << "🚀 C++ Proxy Server: http://127.0.0.1:2442" << std::endl;
+        std::cout << "🚀 C++ Proxy Server: http://127.0.0.1:2424" << std::endl;
         for(;;) {
             tcp::socket socket{ioc};
             acceptor.accept(socket);

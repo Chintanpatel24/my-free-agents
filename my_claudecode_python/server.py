@@ -25,9 +25,31 @@ from .config import (
     write_env_values,
 )
 
-SENSITIVE_KEYS = ("API", "API_KEY")
+import threading
 
-LOG_QUEUE: collections.deque[str] = collections.deque(maxlen=50)
+# Global AppState for thread-safe dynamic configuration
+class AppState:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.config = {}
+
+    def load(self):
+        with self.lock:
+            self.config = load_env()
+
+    def update(self, updates: Dict[str, str]):
+        with self.lock:
+            self.config.update(updates)
+            write_env_values(updates)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        with self.lock:
+            return self.config.get(key, default)
+
+STATE = AppState()
+STATE.load()
+
+SENSITIVE_KEYS = ("API", "API_KEY")
 LAST_LATENCY: Dict[str, float] = {"value": 0.0}
 LAST_FIRST_BYTE: Dict[str, float] = {"value": 0.0}
 
@@ -471,17 +493,17 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urlparse(self.path).path
         if path in ("/", "/health"):
-            values = load_env()
+            values = STATE.config
             provider = get_provider(values)
             return self._send(200, {"ok": True, "name": "free-claude-code", "provider": provider.name, "model": provider.model})
         if path in ("/v1/models", "/models"):
             # Check for no-cache header to force refresh
-            cache_control = self.headers.get("Cache-Control", "")
+            cache_control = self.headers.get("Cache-Cache-Control", "")
             if "no-cache" in cache_control:
                 global MODEL_CACHE
                 MODEL_CACHE["expires_at"] = 0
 
-            values = load_env()
+            values = STATE.config
             provider = get_provider(values)
             try:
                 return self._send(200, models_response(provider, values), {"Cache-Control": "no-store, no-cache, must-revalidate"})
@@ -489,6 +511,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(500, {"type": "error", "error": {"type": "models_error", "message": str(e)}})
         if path == "/admin":
             return self._admin_get()
+        if path == "/admin/static":
+            return self._admin_static()
+        if path.startswith("/admin/static/"):
+            return self._admin_static()
         if path == "/admin/logs":
             return self._send(200, {"logs": list(LOG_QUEUE), "latency": LAST_LATENCY.get("value", 0.0), "first_byte": LAST_FIRST_BYTE.get("value", 0.0)})
         return self._send(404, {"type": "error", "error": {"type": "not_found", "message": path}})
@@ -503,17 +529,19 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"type": "error", "error": {"type": "bad_request", "message": str(e)}})
         if path == "/v1/messages":
             return self._messages()
+        if path == "/admin/save":
+            return self._admin_save()
         if path == "/admin":
             return self._admin_post()
         if path == "/admin/test":
             return self._admin_test()
         return self._send(404, {"type": "error", "error": {"type": "not_found", "message": path}})
 
-    def _messages(self):
+def _messages(self):
         start_time = time.time()
         upstream_model = "unknown"
         try:
-            values = load_env()
+            values = STATE.config
             provider = get_provider(values)
             body = self._read_json()
             max_tokens = int(values.get("DEFAULT_MAX_TOKENS", "4096") or "4096")
@@ -739,7 +767,6 @@ class Handler(BaseHTTPRequestHandler):
         if not self._is_loopback():
             return self._send_text(403, "Admin UI is only available from localhost", "text/plain")
         values = load_env()
-        proxy_port = values.get("PROXY_PORT", DEFAULT_PROXY_PORT)
         provider = get_provider(values)
         api_value = provider.api_key or ""
         current_model = provider.model
@@ -822,8 +849,7 @@ class Handler(BaseHTTPRequestHandler):
 
 <section>
   <h3>System Info</h3>
-  <p>Admin UI: <code>http://{html.escape(values.get('HOST', DEFAULT_HOST))}:{html.escape(values.get('PORT', DEFAULT_PORT))}</code></p>
-  <p>Proxy Server: <code>http://{html.escape(values.get('HOST', DEFAULT_HOST))}:{html.escape(proxy_port)}</code></p>
+  <p>Server URL: <code>http://{html.escape(values.get('HOST', DEFAULT_HOST))}:{html.escape(values.get('PORT', DEFAULT_PORT))}</code></p>
   <p>Models endpoint: <code>/v1/models</code> (shows NVIDIA NIM model ids only)</p>
 </section>
 

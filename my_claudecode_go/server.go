@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"path/filepath"
 	"sync"
 	"time"
 	"strings"
@@ -31,8 +32,15 @@ func logMsg(fmtStr string, args ...any) {
 	logMutex.Unlock()
 }
 
+type Config struct {
+	NvidiaNimApi    string
+	NvidiaNimModel  string
+	NvidiaNimBaseUrl string
+}
+
 type ProxyHandler struct {
-	Config map[string]string
+	config *Config
+	mu     sync.RWMutex
 }
 
 func (h *ProxyHandler) Handle(ctx *fasthttp.RequestCtx) {
@@ -45,11 +53,11 @@ func (h *ProxyHandler) Handle(ctx *fasthttp.RequestCtx) {
 	case path == "/v1/messages":
 		h.handleMessages(ctx)
 	case path == "/admin":
-		if ctx.IsPost() {
-			h.handleAdminPost(ctx)
-		} else {
-			h.handleAdminGet(ctx)
-		}
+		h.handleAdminGet(ctx)
+	case strings.HasPrefix(path, "/admin/static/"):
+		h.handleAdminStatic(ctx)
+	case path == "/admin/save":
+		h.handleAdminSave(ctx)
 	case path == "/admin/logs":
 		h.handleAdminLogs(ctx)
 	case path == "/admin/test":
@@ -62,15 +70,18 @@ func (h *ProxyHandler) Handle(ctx *fasthttp.RequestCtx) {
 
 func (h *ProxyHandler) handleHealth(ctx *fasthttp.RequestCtx) {
 	ctx.SetContentType("application/json")
-	provider := GetProvider(h.Config)
-	fmt.Fprintf(ctx, `{"ok": true, "name": "free-agents-go", "provider": "%s", "model": "%s"}`, provider.Name, provider.Model)
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	fmt.Fprintf(ctx, `{"ok": true, "name": "free-agents-go", "provider": "NVIDIA_NIM", "model": "%s"}`, h.config.NvidiaNimModel)
 }
 
 func (h *ProxyHandler) handleModels(ctx *fasthttp.RequestCtx) {
 	ctx.SetContentType("application/json")
-	provider := GetProvider(h.Config)
+	h.mu.RLock()
+	model := h.config.NvidiaNimModel
+	h.mu.RUnlock()
 
-	models := []string{provider.Model, "meta/llama-3.1-8b-instruct", "meta/llama-3.1-70b-instruct", "meta/llama-3.3-70b-instruct"}
+	models := []string{model, "meta/llama-3.1-8b-instruct", "meta/llama-3.1-70b-instruct", "meta/llama-3.3-70b-instruct"}
 
 	data := map[string]any{
 		"object": "list",
@@ -99,8 +110,12 @@ func (h *ProxyHandler) handleMessages(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	provider := GetProvider(h.Config)
-	modelID := provider.Model
+	h.mu.RLock()
+	modelID := h.config.NvidiaNimModel
+	apiKey := h.config.NvidiaNimApi
+	baseURL := h.config.NvidiaNimBaseUrl
+	h.mu.RUnlock()
+
 	if anthropicReq.Model != "" && !strings.HasPrefix(anthropicReq.Model, "claude-") {
 		modelID = anthropicReq.Model
 	}
@@ -110,6 +125,14 @@ func (h *ProxyHandler) handleMessages(ctx *fasthttp.RequestCtx) {
 	logMsg("Forwarding request: stream=%v model=%s", anthropicReq.Stream, modelID)
 
 	if anthropicReq.Stream {
+		// We need to pass provider info to handleStream
+		provider := ProviderConfig{
+			Name:     "NVIDIA_NIM",
+			BaseURL:  baseURL,
+			APIKey:   apiKey,
+			Model:    modelID,
+			NeedsKey: true,
+		}
 		h.handleStream(ctx, provider, openaiReq, startTime)
 		return
 	}
@@ -120,10 +143,10 @@ func (h *ProxyHandler) handleMessages(ctx *fasthttp.RequestCtx) {
 	defer fasthttp.ReleaseRequest(req)
 	defer fasthttp.ReleaseResponse(resp)
 
-	req.SetRequestURI(provider.BaseURL + "/chat/completions")
+	req.SetRequestURI(baseURL + "/chat/completions")
 	req.Header.SetMethod("POST")
 	req.Header.SetContentType("application/json")
-	req.Header.Set("Authorization", "Bearer "+provider.APIKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 	body, _ := json.Marshal(openaiReq)
 	req.SetBody(body)
 
@@ -213,14 +236,47 @@ func (h *ProxyHandler) handleStream(ctx *fasthttp.RequestCtx, provider ProviderC
 
 func (h *ProxyHandler) handleAdminGet(ctx *fasthttp.RequestCtx) {
 	ctx.SetContentType("text/html")
-	provider := GetProvider(h.Config)
-
-	html := `<!doctype html><html><head><title>Go Admin</title></head><body><h1>Go Proxy Admin</h1><p>Model: ` + provider.Model + `</p></body></html>`
-	fmt.Fprint(ctx, html)
+	ctx.Redirect("/admin/static/index.html", 302)
 }
 
-func (h *ProxyHandler) handleAdminPost(ctx *fasthttp.RequestCtx) {
-	ctx.Redirect("/admin", 303)
+func (h *ProxyHandler) handleAdminSave(ctx *fasthttp.RequestCtx) {
+	var payload struct {
+		NvidiaApi    string `json:"nvidia_api"`
+		NvidiaModel  string `json:"nvidia_model"`
+		NvidiaBaseUrl string `json:"base_url"`
+	}
+	if err := json.Unmarshal(ctx.PostBody(), &payload); err != nil {
+		ctx.SetStatusCode(400)
+		return
+	}
+
+	h.mu.Lock()
+	if payload.NvidiaApi != "" {
+		h.config.NvidiaNimApi = payload.NvidiaApi
+	}
+	if payload.NvidiaModel != "" {
+		h.config.NvidiaNimModel = payload.NvidiaModel
+	}
+	if payload.NvidiaBaseUrl != "" {
+		h.config.NvidiaNimBaseUrl = payload.NvidiaBaseUrl
+	}
+	h.mu.Unlock()
+
+	ctx.SetContentType("application/json")
+	fmt.Fprint(ctx, `{"ok": true}`)
+}
+
+func (h *ProxyHandler) handleAdminStatic(ctx *fasthttp.RequestCtx) {
+	path := string(ctx.Path())
+	// Strip /admin/static/ prefix
+	filePath := path[len("/admin/static/"):]
+	if filePath == "" {
+		filePath = "index.html"
+	}
+
+	// Serve from assets/admin
+	fullPath := filepath.Join("assets", "admin", filePath)
+	fasthttp.ServeFile(ctx, fullPath)
 }
 
 func (h *ProxyHandler) handleAdminLogs(ctx *fasthttp.RequestCtx) {

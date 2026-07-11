@@ -40,23 +40,23 @@ graph TD
     classDef storage fill:#fff3cd,stroke:#664d03,stroke-width:2px;
 
     subgraph ClientSpace ["User Space & Client"]
-        User(["👤 User / Developer"]) -->|runs| CC["💻 Claude Code CLI<br>(my-claudecode)"]
+        User(["User / Developer"]) -->|runs| CC["Claude Code CLI<br>(my-claudecode)"]
         CC -->|Env Vars Set:<br>ANTHROPIC_BASE_URL=http://localhost:2424/v1| CC
     end
 
     subgraph ProxySpace ["Local Proxy Architecture (Port: 2424)"]
         PS{"Proxy Engines<br>(Selectable)"}:::proxy
-        PyProxy["🐍 Python Proxy<br>(FastAPI/Uvicorn)"]:::proxy
-        GoProxy["🐹 Go Proxy<br>(fasthttp)"]:::proxy
-        RustProxy["🦀 Rust Proxy<br>(axum/tokio)"]:::proxy
-        CppProxy["⚙️ C++ Proxy<br>(Boost.Beast)"]:::proxy
+        PyProxy["Python Proxy<br>(FastAPI/Uvicorn)"]:::proxy
+        GoProxy["Go Proxy<br>(fasthttp)"]:::proxy
+        RustProxy["Rust Proxy<br>(axum/tokio)"]:::proxy
+        CppProxy["C++ Proxy<br>(Boost.Beast)"]:::proxy
 
         PS --- PyProxy
         PS --- GoProxy
         PS --- RustProxy
         PS --- CppProxy
 
-        AdminUI["🖥️ Admin Control Panel<br>(localhost:2424/admin)"]:::proxy
+        AdminUI["Admin Control Panel<br>(localhost:2424/admin)"]:::proxy
 
         subgraph Logic ["Request Handling & Translation Core"]
             LocalCheck{"Is Local Fast Greeting?<br>(FREE_AGENTS_LOCAL_GREETINGS=1)"}
@@ -69,13 +69,13 @@ graph TD
     end
 
     subgraph ConfigSpace ["Configuration & Storage"]
-        EnvFile["📄 .env File<br>(NVIDIA_NIM_API key)"]:::storage
-        SettingsFile["⚙️ settings.json<br>(Configured Models/State)"]:::storage
+        EnvFile[".env File<br>(NVIDIA_NIM_API key)"]:::storage
+        SettingsFile["settings.json<br>(Configured Models/State)"]:::storage
     end
 
     subgraph UpstreamSpace ["NVIDIA NIM Global Upstream"]
-        NimAPI["☁️ NVIDIA NIM API Gateway<br>(integrate.api.nvidia.com)"]:::upstream
-        NimModels["🤖 NVIDIA NIM Models<br>(Llama-3.3-70b / Nemotron / etc.)"]:::upstream
+        NimAPI["NVIDIA NIM API Gateway<br>(integrate.api.nvidia.com)"]:::upstream
+        NimModels["NVIDIA NIM Models<br>(Llama-3.3-70b / Nemotron / etc.)"]:::upstream
     end
 
     %% Flow connections
@@ -105,7 +105,7 @@ graph TD
     NimAPI -->|Forward SSE Stream| PS
 
     subgraph ResponseLogic ["Response Mapping Engine"]
-        SSEParser["⚡ High-Performance SSE Parser"]
+        SSEParser["High-Performance SSE Parser"]
         ResponseTranslate["Payload Mapping<br>(openai_to_anthropic)"]
     end
 

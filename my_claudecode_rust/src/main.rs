@@ -26,7 +26,7 @@ async fn main() {
 
     let app = create_router(state);
 
-    println!("🚀 Rust Proxy Server: http://{}", addr);
+    println!("Rust Proxy Server: http://{}", addr);
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }

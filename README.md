@@ -32,7 +32,6 @@ Choose the best engine for your needs:
 
 ```mermaid
 graph TD
-    %% Define styles and classes
     classDef client fill:#d1e7dd,stroke:#0f5132,stroke-width:2px;
     classDef proxy fill:#cff4fc,stroke:#087990,stroke-width:2px;
     classDef upstream fill:#f8d7da,stroke:#842029,stroke-width:2px;
@@ -57,13 +56,13 @@ graph TD
 
         AdminUI["Admin Control Panel<br>(localhost:2424/admin)"]:::proxy
 
-        subgraph Logic ["Request Handling & Translation Core"]
-            LocalCheck{"Is Local Fast Greeting?<br>(FREE_AGENTS_LOCAL_GREETINGS=1)"}
-            LocalGreet["Instant Local Response<br>('Hi! I am ready.')"]
+        subgraph Logic [Request Handling and Translation Core]
+            LocalCheck{Is Local Fast Greeting}
+            LocalGreet[Instant Local Response]
 
-            PayloadTranslate["Payload Translation<br>(build_openai_request)"]
-            ToolMap["Bidirectional Tool Use Mapping<br>(Anthropic Messages <-> OpenAI)"]
-            ModelMap["Selected Model Resolution<br>(Meta/Mistral/DeepSeek/etc.)"]
+            PayloadTranslate[Payload Translation]
+            ToolMap[Bidirectional Tool Use Mapping]
+            ModelMap[Selected Model Resolution]
         end
     end
 
@@ -77,19 +76,17 @@ graph TD
         NimModels["NVIDIA NIM Models<br>(Llama-3.3-70b / Nemotron / etc.)"]:::upstream
     end
 
-    %% Flow connections
-    CC -->|1. HTTP /v1/messages| PS
+    CC -->|1. HTTP Messages| PS
     PS -->|Read Config| EnvFile
     PS -->|Read Settings| SettingsFile
 
-    AdminUI -->|Update Keys/Models| EnvFile
+    AdminUI -->|Update Keys and Models| EnvFile
     AdminUI -->|Update Preferences| SettingsFile
     AdminUI -.->|Test Connection| NimAPI
 
-    %% Execution flow within Logic
     PyProxy & GoProxy & RustProxy & CppProxy --> LocalCheck
 
-    LocalCheck -->|Yes: e.g. 'hi'| LocalGreet
+    LocalCheck -->|Yes| LocalGreet
     LocalGreet -->|Instant Response| CC
 
     LocalCheck -->|No| PayloadTranslate
@@ -99,8 +96,7 @@ graph TD
     ModelMap -->|2. Forward translated request| NimAPI
     NimAPI -->|Processes request| NimModels
 
-    %% Stream & Response backflow
-    NimModels -->|3. Streaming chunks (OpenAI SSE)| NimAPI
+    NimModels -->|3. Streaming chunks| NimAPI
     NimAPI -->|Forward SSE Stream| PS
 
     subgraph ResponseLogic ["Response Mapping Engine"]

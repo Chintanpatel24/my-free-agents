@@ -27,6 +27,94 @@ Choose the best engine for your needs:
 <image src="assets/working-fine.png" alt="claudecode-woring-image">
 </div>
 
+## How It Works
+
+Here is the detailed high-performance multi-server proxy architecture showing how requests flow, translate, and stream between Claude Code and the NVIDIA NIM APIs:
+
+```mermaid
+graph TD
+    %% Define styles and classes
+    classDef client fill:#d1e7dd,stroke:#0f5132,stroke-width:2px;
+    classDef proxy fill:#cff4fc,stroke:#087990,stroke-width:2px;
+    classDef upstream fill:#f8d7da,stroke:#842029,stroke-width:2px;
+    classDef storage fill:#fff3cd,stroke:#664d03,stroke-width:2px;
+
+    subgraph ClientSpace ["User Space & Client"]
+        User(["👤 User / Developer"]) -->|runs| CC["💻 Claude Code CLI<br>(my-claudecode)"]
+        CC -->|Env Vars Set:<br>ANTHROPIC_BASE_URL=http://localhost:2424/v1| CC
+    end
+
+    subgraph ProxySpace ["Local Proxy Architecture (Port: 2424)"]
+        PS{"Proxy Engines<br>(Selectable)"}:::proxy
+        PyProxy["🐍 Python Proxy<br>(FastAPI/Uvicorn)"]:::proxy
+        GoProxy["🐹 Go Proxy<br>(fasthttp)"]:::proxy
+        RustProxy["🦀 Rust Proxy<br>(axum/tokio)"]:::proxy
+        CppProxy["⚙️ C++ Proxy<br>(Boost.Beast)"]:::proxy
+
+        PS --- PyProxy
+        PS --- GoProxy
+        PS --- RustProxy
+        PS --- CppProxy
+
+        AdminUI["🖥️ Admin Control Panel<br>(localhost:2424/admin)"]:::proxy
+
+        subgraph Logic ["Request Handling & Translation Core"]
+            LocalCheck{"Is Local Fast Greeting?<br>(FREE_AGENTS_LOCAL_GREETINGS=1)"}
+            LocalGreet["Instant Local Response<br>('Hi! I am ready.')"]
+
+            PayloadTranslate["Payload Translation<br>(build_openai_request)"]
+            ToolMap["Bidirectional Tool Use Mapping<br>(Anthropic Messages <-> OpenAI)"]
+            ModelMap["Selected Model Resolution<br>(Meta/Mistral/DeepSeek/etc.)"]
+        end
+    end
+
+    subgraph ConfigSpace ["Configuration & Storage"]
+        EnvFile["📄 .env File<br>(NVIDIA_NIM_API key)"]:::storage
+        SettingsFile["⚙️ settings.json<br>(Configured Models/State)"]:::storage
+    end
+
+    subgraph UpstreamSpace ["NVIDIA NIM Global Upstream"]
+        NimAPI["☁️ NVIDIA NIM API Gateway<br>(integrate.api.nvidia.com)"]:::upstream
+        NimModels["🤖 NVIDIA NIM Models<br>(Llama-3.3-70b / Nemotron / etc.)"]:::upstream
+    end
+
+    %% Flow connections
+    CC -->|1. HTTP /v1/messages| PS
+    PS -->|Read Config| EnvFile
+    PS -->|Read Settings| SettingsFile
+
+    AdminUI -->|Update Keys/Models| EnvFile
+    AdminUI -->|Update Preferences| SettingsFile
+    AdminUI -.->|Test Connection| NimAPI
+
+    %% Execution flow within Logic
+    PyProxy & GoProxy & RustProxy & CppProxy --> LocalCheck
+
+    LocalCheck -->|Yes: e.g. 'hi'| LocalGreet
+    LocalGreet -->|Instant Response| CC
+
+    LocalCheck -->|No| PayloadTranslate
+    PayloadTranslate --> ToolMap
+    ToolMap --> ModelMap
+
+    ModelMap -->|2. Forward translated request| NimAPI
+    NimAPI -->|Processes request| NimModels
+
+    %% Stream & Response backflow
+    NimModels -->|3. Streaming chunks (OpenAI SSE)| NimAPI
+    NimAPI -->|Forward SSE Stream| PS
+
+    subgraph ResponseLogic ["Response Mapping Engine"]
+        SSEParser["⚡ High-Performance SSE Parser"]
+        ResponseTranslate["Payload Mapping<br>(openai_to_anthropic)"]
+    end
+
+    PS --> SSEParser
+    SSEParser --> ResponseTranslate
+    ResponseTranslate -->|4. Chunked Anthropic Events| CC
+    CC -->|5. Real-time Typing Effect| User
+```
+
 <!-- ## Table of contents
 
 - [Providers](#Providers)

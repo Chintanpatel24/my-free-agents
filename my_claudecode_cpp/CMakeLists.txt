@@ -7,5 +7,5 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native")
 find_package(Boost REQUIRED COMPONENTS system thread)
 find_package(OpenSSL REQUIRED)
 
-add_executable(my_claudecode_cpp main.cpp)
+add_executable(my_claudecode_cpp main.cpp anthropic.cpp config.cpp server.cpp)
 target_link_libraries(my_claudecode_cpp Boost::system Boost::thread OpenSSL::SSL OpenSSL::Crypto pthread)

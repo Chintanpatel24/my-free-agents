@@ -31,7 +31,7 @@ int main() {
         unsigned short port = 2424;
         net::io_context ioc{1};
         tcp::acceptor acceptor{ioc, {address, port}};
-        std::cout << "🚀 C++ Proxy Server: http://127.0.0.1:2424" << std::endl;
+        std::cout << "C++ Proxy Server: http://127.0.0.1:2424" << std::endl;
         for(;;) {
             tcp::socket socket{ioc};
             acceptor.accept(socket);

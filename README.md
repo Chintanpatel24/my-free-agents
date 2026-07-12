@@ -28,7 +28,8 @@ Choose the best engine for your needs:
 </div>
 
 ## How It Works
->Here is the detailed high-performance multi-server proxy architecture showing how requests flow, translate, and stream between Claude Code and the NVIDIA NIM APIs:
+
+Here is the detailed high-performance multi-server proxy architecture showing how requests flow, translate, and stream between Claude Code and the NVIDIA NIM APIs:
 
 ```mermaid
 graph TD
@@ -37,24 +38,23 @@ graph TD
     classDef upstream fill:#f8d7da,stroke:#842029,stroke-width:2px;
     classDef storage fill:#fff3cd,stroke:#664d03,stroke-width:2px;
 
-    subgraph ClientSpace ["User Space & Client"]
-        User(["User / Developer"]) -->|runs| CC["Claude Code CLI<br>(my-claudecode)"]
-        CC -->|Env Vars Set:<br>ANTHROPIC_BASE_URL=http://localhost:2424/v1| CC
+    subgraph ClientSpace [User Space and Client]
+        User([User or Developer]) -->|runs| CC[Claude Code CLI]
     end
 
-    subgraph ProxySpace ["Local Proxy Architecture (Port: 2424)"]
-        PS{"Proxy Engines<br>(Selectable)"}:::proxy
-        PyProxy["Python Proxy<br>(FastAPI/Uvicorn)"]:::proxy
-        GoProxy["Go Proxy<br>(fasthttp)"]:::proxy
-        RustProxy["Rust Proxy<br>(axum/tokio)"]:::proxy
-        CppProxy["C++ Proxy<br>(Boost.Beast)"]:::proxy
+    subgraph ProxySpace [Local Proxy Architecture Port 2424]
+        PS{Proxy Engines}:::proxy
+        PyProxy[Python Proxy FastAPI Uvicorn]:::proxy
+        GoProxy[Go Proxy fasthttp]:::proxy
+        RustProxy[Rust Proxy axum tokio]:::proxy
+        CppProxy[C++ Proxy Boost Beast]:::proxy
 
         PS --- PyProxy
         PS --- GoProxy
         PS --- RustProxy
         PS --- CppProxy
 
-        AdminUI["Admin Control Panel<br>(localhost:2424/admin)"]:::proxy
+        AdminUI[Admin Control Panel]:::proxy
 
         subgraph Logic [Request Handling and Translation Core]
             LocalCheck{Is Local Fast Greeting}
@@ -62,18 +62,24 @@ graph TD
 
             PayloadTranslate[Payload Translation]
             ToolMap[Bidirectional Tool Use Mapping]
-            ModelMap[Selected Model Resolution]
+            ModelMap[Selected Model and Provider Resolution]
         end
     end
 
-    subgraph ConfigSpace ["Configuration & Storage"]
-        EnvFile[".env File<br>(NVIDIA_NIM_API key)"]:::storage
-        SettingsFile["settings.json<br>(Configured Models/State)"]:::storage
+    subgraph ConfigSpace [Configuration and Storage]
+        EnvFile[env File]:::storage
+        SettingsFile[settings json File]:::storage
     end
 
-    subgraph UpstreamSpace ["NVIDIA NIM Global Upstream"]
-        NimAPI["NVIDIA NIM API Gateway<br>(integrate.api.nvidia.com)"]:::upstream
-        NimModels["NVIDIA NIM Models<br>(Llama-3.3-70b / Nemotron / etc.)"]:::upstream
+    subgraph UpstreamSpace [Upstream Providers]
+        subgraph NvidiaNim [NVIDIA NIM Provider]
+            NimAPI[NVIDIA NIM API Gateway]:::upstream
+            NimModels[NVIDIA NIM Models]:::upstream
+        end
+        subgraph OtherProviders [Other Upstream Providers Future]
+            OpenAIAPI[OpenAI or OpenAI Compatible API]:::upstream
+            OllamaAPI[Local Ollama or Llama.cpp API]:::upstream
+        end
     end
 
     CC -->|1. HTTP Messages| PS
@@ -94,14 +100,17 @@ graph TD
     ToolMap --> ModelMap
 
     ModelMap -->|2. Forward translated request| NimAPI
+    ModelMap -.->|Future Extensibility| OpenAIAPI
+    ModelMap -.->|Future Extensibility| OllamaAPI
+
     NimAPI -->|Processes request| NimModels
 
     NimModels -->|3. Streaming chunks| NimAPI
     NimAPI -->|Forward SSE Stream| PS
 
-    subgraph ResponseLogic ["Response Mapping Engine"]
-        SSEParser["High-Performance SSE Parser"]
-        ResponseTranslate["Payload Mapping<br>(openai_to_anthropic)"]
+    subgraph ResponseLogic [Response Mapping Engine]
+        SSEParser[SSE Parser]
+        ResponseTranslate[Payload Mapping]
     end
 
     PS --> SSEParser

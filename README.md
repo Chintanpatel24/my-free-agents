@@ -179,7 +179,8 @@ irm https://raw.githubusercontent.com/Chintanpatel24/my-free-agents/main/update.
 
 <a name="How-to-Use"></a>
 ## How to Use
-
+>[!TIP]
+>- Don't go with the higher-perimeter models like `glm5.2` because they will cause a very late response for every query, so use models like `Gemma 4-31B-IT` for medium latency and use other fastest models that have vast token generation (a low-parameter model with good context and reasoning capabilities). 
 1. **Choose and Install Your Proxy Server**:
    Run the new installation script to select your preferred high-performance engine:
    ```bash

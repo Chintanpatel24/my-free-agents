@@ -254,3 +254,7 @@ Useful optional settings:
 - `FREE_AGENTS_LOCAL_GREETINGS=1` replies locally to tiny greetings like `hi`, so the quick health-check prompt answers instantly.
 
 Streaming responses send the Anthropic `message_start` event immediately, before waiting for NVIDIA, so Claude Code should not look frozen while the upstream model is warming up.
+
+## Star history
+
+[![RepoStars](https://repostars.dev/api/embed?repo=Chintanpatel24%2Fmy-free-agents&theme=dark)](https://repostars.dev/?repos=Chintanpatel24%2Fmy-free-agents&theme=dark)

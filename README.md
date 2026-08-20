@@ -180,7 +180,8 @@ irm https://raw.githubusercontent.com/Chintanpatel24/my-free-agents/main/update.
 <a name="How-to-Use"></a>
 ## How to Use
 >[!TIP]
->- Don't go with the higher-perimeter models like `glm5.2` because they will cause a very late response for every query, so use models like `Gemma 4-31B-IT` for medium latency and use other fastest models that have vast token generation (a low-parameter model with good context and reasoning capabilities). 
+>- Don't go with the higher-perimeter models like `glm5.2` because they will cause a very late response for every query, so use models like `Gemma 4-31B-IT` for medium latency and use other fastest models that have vast token generation (a low-parameter model with good context and reasoning capabilities).
+>- For nvidia's api you can go with nemotron lineup whbich have a grate token gentration speed so use it for complex takes . for an example use `nemotron-3-ultra-550b-a55b`
 1. **Choose and Install Your Proxy Server**:
    Run the new installation script to select your preferred high-performance engine:
    ```bash
